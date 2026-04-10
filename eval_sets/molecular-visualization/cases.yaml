@@ -1,0 +1,204 @@
+cases:
+
+  - id: load-1crn
+    difficulty: trivial
+    prompt: "Load the PDB entry 1CRN on the viewer."
+    tags: [load]
+    timeout_s: 120
+    expected_cost_usd: 0.02
+    assertions:
+      - type: tool_called
+        name: pmview_load
+      - type: viewer_has_molecule
+        identifier: "1CRN"
+      - type: no_tool_error
+    rubric:
+      enabled: false
+
+  - id: load-ligand-sdf
+    difficulty: trivial
+    prompt: "Load ligand.sdf and tell me its SMILES."
+    fixtures: [ligand.sdf]
+    tags: [load, smiles]
+    timeout_s: 180
+    assertions:
+      - type: tool_called
+        name: pmview_load
+      - type: output_contains
+        value: "Cn1cnc2c1c(=O)n(c(=O)n2C)C"
+        case_sensitive: true
+      - type: no_tool_error
+    rubric:
+      enabled: true
+      dimensions:
+        - name: correctness
+          question: "Does the answer report the correct SMILES without hedging?"
+        - name: communication
+          question: "Is the SMILES cited cleanly in the final answer?"
+
+  - id: chain-a-cartoon-3ptb
+    difficulty: easy
+    prompt: "Load 3PTB and show only chain A as a cartoon."
+    tags: [select, cartoon, chains]
+    assertions:
+      - type: tool_called
+        name: pmview_load
+      - type: viewer_has_molecule
+        identifier: "3PTB"
+      - type: viewer_representation_is
+        representation: cartoon
+      - type: no_tool_error
+    rubric:
+      enabled: true
+
+  - id: color-by-chain-4hhb
+    difficulty: easy
+    prompt: "Load 4HHB and color it by chain."
+    tags: [color]
+    assertions:
+      - type: tool_called
+        name: pmview_load
+      - type: viewer_has_molecule
+        identifier: "4HHB"
+      - type: viewer_color_scheme_is
+        scheme: chain
+      - type: no_tool_error
+    rubric:
+      enabled: true
+
+  - id: heme-sticks-4hhb
+    difficulty: easy
+    prompt: "Load 4HHB and show all heme groups as sticks."
+    tags: [select, sticks, ligand]
+    assertions:
+      - type: tool_called
+        name: pmview_load
+      - type: viewer_has_residue
+        name: "HEM"
+      - type: viewer_representation_is
+        representation: sticks
+      - type: no_tool_error
+    rubric:
+      enabled: true
+
+  - id: rotate-1hvr-dimer-interface
+    difficulty: medium
+    prompt: |
+      Load 1HVR and orient the camera so the dimer interface is clearly
+      visible at the center of the viewport.
+    tags: [camera, rotate, interface]
+    assertions:
+      - type: tool_called
+        name: pmview_load
+      - type: viewer_has_molecule
+        identifier: "1HVR"
+      - type: no_tool_error
+    rubric:
+      enabled: true
+      dimensions:
+        - name: visualization_quality
+          question: |
+            Does the screenshot clearly show the dimer interface — both
+            chains visible, the interface roughly centered, no occlusion?
+        - name: correctness
+          question: "Did the assistant identify and orient toward the actual interface?"
+
+  - id: align-1crn-1cbn
+    difficulty: medium
+    prompt: "Load 1CRN and 1CBN and align them. Report the RMSD."
+    tags: [align, multi]
+    timeout_s: 360
+    assertions:
+      - type: tool_called
+        name: pmview_load
+      - type: tool_call_count
+        name: pmview_load
+        op: ">="
+        value: 2
+      - type: viewer_system_count
+        op: ">="
+        value: 2
+      - type: output_matches_regex
+        pattern: "(?i)rmsd\\s*[:=]?\\s*\\d+(?:\\.\\d+)?"
+      - type: no_tool_error
+    rubric:
+      enabled: true
+
+  - id: heme-iron-distance-4hhb
+    difficulty: medium
+    prompt: |
+      Load 4HHB and measure the distance, in Ångströms, between the iron
+      atoms of the two alpha-chain heme groups.
+    tags: [measure, distance]
+    timeout_s: 360
+    assertions:
+      - type: tool_called
+        name: pmview_load
+      - type: viewer_has_molecule
+        identifier: "4HHB"
+      - type: viewer_has_residue
+        name: "HEM"
+      - type: output_numeric_close
+        value: 25.0
+        tolerance: 5.0
+      - type: no_tool_error
+    rubric:
+      enabled: true
+
+  - id: residues-near-heme-1gzx
+    difficulty: hard
+    prompt: |
+      Load 1GZX, select all residues within 5 Å of any heme group, and
+      color the selection by hydrophobicity.
+    tags: [select, distance, color, compound]
+    timeout_s: 480
+    assertions:
+      - type: tool_called
+        name: pmview_load
+      - type: viewer_has_residue
+        name: "HEM"
+      - type: viewer_color_scheme_is
+        scheme: hydrophob
+      - type: no_tool_error
+    rubric:
+      enabled: true
+      dimensions:
+        - name: correctness
+          question: |
+            Did the assistant make a sensible "within 5 Å of HEM" selection?
+            Cite evidence from the trace or final answer.
+        - name: visualization_quality
+          question: |
+            Is the colored selection visually distinguishable in the
+            screenshot? Are the hydrophobicity colors actually applied?
+
+  - id: better-active-site-resolution
+    difficulty: hard
+    prompt: |
+      Load PDB entries 1CRN and 4HHB. Determine which one has the better
+      resolved active site and explain your reasoning briefly.
+    tags: [reasoning, multi, compare]
+    timeout_s: 480
+    assertions:
+      - type: tool_called
+        name: pmview_load
+      - type: tool_call_count
+        name: pmview_load
+        op: ">="
+        value: 2
+      - type: viewer_system_count
+        op: ">="
+        value: 2
+      - type: output_matches_regex
+        pattern: "(?i)(1crn|4hhb)"
+      - type: no_tool_error
+    rubric:
+      enabled: true
+      dimensions:
+        - name: correctness
+          question: |
+            Did the assistant pick the structure with the genuinely better
+            active site resolution and justify it (resolution value, ligand
+            presence, B-factors)?
+        - name: communication
+          question: "Is the answer concise and free of hedging?"

@@ -1,0 +1,90 @@
+[project]
+name = "pmai-evals"
+version = "0.1.0"
+description = "Evals for the playmoleculeAI agentic system."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "Carles Navarro" }]
+
+dependencies = [
+    "pydantic>=2.7",
+    "pydantic-settings>=2.4",
+    "typer>=0.12",
+    "rich>=13.7",
+    "playwright>=1.47",
+    "httpx>=0.27",
+    "ruamel.yaml>=0.18",
+    "anthropic>=0.39",
+    "openai>=1.50",
+    "google-genai>=0.3",
+    "pillow>=10.4",
+    "jinja2>=3.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-playwright>=0.5",
+    "ruff>=0.6",
+    "pyright>=1.1.380",
+]
+
+[project.scripts]
+pmai-evals = "pmai_evals.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pmai_evals"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/pmai_evals/pricing.yaml" = "pmai_evals/pricing.yaml"
+"src/pmai_evals/grading/prompts" = "pmai_evals/grading/prompts"
+"src/pmai_evals/grading/rubrics" = "pmai_evals/grading/rubrics"
+"src/pmai_evals/reporting/templates" = "pmai_evals/reporting/templates"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",      # pycodestyle / pyflakes
+    "I",                # isort
+    "B",                # bugbear
+    "UP",               # pyupgrade
+    "SIM",              # simplify
+    "RUF",              # ruff-specific
+]
+ignore = [
+    "E501",   # line length handled by formatter
+    "RUF001", # ambiguous unicode in strings (we use × intentionally)
+    "RUF002", # ambiguous unicode in docstrings
+    "RUF003", # ambiguous unicode in comments
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B", "SIM"]
+
+[tool.pyright]
+include = ["src"]
+exclude = ["**/__pycache__", "runs", "playwright"]
+typeCheckingMode = "strict"
+pythonVersion = "3.11"
+reportMissingTypeStubs = false
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "browser: integration test that launches a real browser",
+    "e2e: end-to-end test (slow, full harness)",
+]

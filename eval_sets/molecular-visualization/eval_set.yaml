@@ -1,0 +1,12 @@
+id: molecular-visualization
+skill_under_test: pmview
+description: |
+  Basic molecular viewer operations exercised end-to-end through the
+  Molstar viewer + Pyodide worker — load PDBs, select substructures,
+  apply representations, measure distances, and reason about 3D context.
+difficulty: mixed
+requires_browser: true
+default_timeout_s: 300
+default_expected_cost_usd: 0.05
+rubric_path: rubric.md
+tags: [viewer, visualization, pmview, pilot]

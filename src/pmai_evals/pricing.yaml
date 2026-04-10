@@ -1,0 +1,49 @@
+# Model registry + price table.
+#
+# Update prices manually as providers change them. Costs are USD per million
+# tokens. Prices are intentionally rough — they're for budget enforcement,
+# not accounting. Verify against the provider's current pricing page before
+# trusting absolute dollar figures.
+
+models:
+  # --- flagship: benchmark targets ---
+  - id: gpt-5.4
+    provider: openai
+    tier: flagship
+    input_per_mtok_usd: 5.00
+    output_per_mtok_usd: 15.00
+    cached_input_per_mtok_usd: 1.25
+    supports_vision: true
+
+  - id: claude-sonnet-4-6
+    provider: anthropic
+    tier: flagship
+    input_per_mtok_usd: 3.00
+    output_per_mtok_usd: 15.00
+    cached_input_per_mtok_usd: 0.30
+    supports_vision: true
+
+  - id: gemini-3.1-pro-preview
+    provider: google
+    tier: flagship
+    input_per_mtok_usd: 1.25
+    output_per_mtok_usd: 5.00
+    cached_input_per_mtok_usd: 0.31
+    supports_vision: true
+
+  # --- cheap: harness iteration ---
+  - id: gpt-5.4-mini
+    provider: openai
+    tier: cheap
+    input_per_mtok_usd: 0.40
+    output_per_mtok_usd: 1.60
+    cached_input_per_mtok_usd: 0.10
+    supports_vision: true
+
+  - id: gpt-5.4-nano
+    provider: openai
+    tier: cheap
+    input_per_mtok_usd: 0.10
+    output_per_mtok_usd: 0.40
+    cached_input_per_mtok_usd: 0.025
+    supports_vision: false

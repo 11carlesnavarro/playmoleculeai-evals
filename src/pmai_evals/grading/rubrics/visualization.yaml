@@ -1,0 +1,22 @@
+# Default rubric for the molecular-visualization eval set.
+# Used when a case enables rubric grading without specifying its own
+# dimensions.
+
+dimensions:
+  - name: correctness
+    question: |
+      Does the response correctly answer the prompt? Are factual claims
+      (PDB IDs, residue names, distances, SMILES) accurate?
+    scale: [1, 5]
+  - name: visualization_quality
+    question: |
+      Is the viewer state appropriate for the question? Is the camera
+      positioned to make the relevant structure clearly visible? Are
+      representations and coloring informative?
+    scale: [1, 5]
+  - name: communication
+    question: |
+      Is the final text answer clear, concise, and free of hedging? Does
+      it directly address the question without unrequested digressions?
+    scale: [1, 5]
+pass_threshold: 3.5
