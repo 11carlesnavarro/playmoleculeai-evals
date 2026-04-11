@@ -41,23 +41,5 @@ async () => {
 }
 """
 
-# Best-effort chat-id extraction. Tries the URL first (the production frontend
-# embeds it as ``/chat/<uuid>``), then falls back to a global app store if one
-# exists.
-CHAT_ID_FROM_PAGE = """
-() => {
-    const fromUrl = window.location.pathname.match(/\\/chat\\/([0-9a-fA-F]{8,})/);
-    if (fromUrl) return fromUrl[1];
-    const store = window.__pmAppStore || window.__appStore || null;
-    if (store && typeof store.getChatId === 'function') {
-        try { return store.getChatId(); } catch (_) {}
-    }
-    if (store && store.state && store.state.currentChat) {
-        return store.state.currentChat.uid || store.state.currentChat.id || null;
-    }
-    return null;
-}
-"""
-
 # Pyodide-readiness probe.
 PYODIDE_READY = "() => Boolean(window.pyodideWorker && window.molstar)"

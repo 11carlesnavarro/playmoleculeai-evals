@@ -7,10 +7,12 @@ file produced by ``pmai-evals setup-auth``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from pathlib import Path
 from types import TracebackType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from pmai_evals.browser.locators import (
     ACCOUNT_BUTTON,
@@ -27,6 +29,8 @@ if TYPE_CHECKING:
     from pmai_evals.browser.chat import ChatSession
 
 logger = logging.getLogger(__name__)
+
+_AUTH_COOKIES: Final[tuple[str, ...]] = ("access_token", "refresh_token", "csrf_token")
 
 
 class PMBrowser:
@@ -87,30 +91,40 @@ class PMBrowser:
 
     # ---- public API -----------------------------------------------------
 
-    async def ensure_authenticated(self) -> None:
-        """Confirm the saved storage state still grants access.
+    async def _wait_for_auth_cookies(self, timeout_s: float) -> None:
+        """Poll the context until all auth cookies are present, or raise.
 
-        Performs a cheap probe: open the frontend, look for the account
-        button. If not present, raise — the user is expected to re-run
-        ``pmai-evals setup-auth``.
+        The backend sets ``access_token`` / ``refresh_token`` / ``csrf_token``
+        asynchronously after the login form submits, so a UI-only probe
+        can race past a half-finished login. Checking cookies is the
+        authoritative signal — it's what the TS test suite does too.
         """
 
         if self._context is None:
             raise BrowserError("PMBrowser not entered")
-        page = await self._context.new_page()
-        try:
-            await page.goto(self._settings.pm_frontend_url)
-            try:
-                await page.get_by_role(
-                    ACCOUNT_BUTTON[0], name=ACCOUNT_BUTTON[1]
-                ).wait_for(timeout=15_000)
-            except Exception as exc:
-                raise AuthError(
-                    "no Account button visible; storage state is missing or expired. "
-                    "Run `pmai-evals setup-auth`."
-                ) from exc
-        finally:
-            await page.close()
+        deadline = time.monotonic() + timeout_s
+        missing: set[str] = set(_AUTH_COOKIES)
+        while time.monotonic() < deadline:
+            names = {c["name"] for c in await self._context.cookies()}
+            missing = set(_AUTH_COOKIES) - names
+            if not missing:
+                return
+            await asyncio.sleep(0.25)
+        raise AuthError(
+            f"auth cookies missing after {timeout_s:.0f}s: {sorted(missing)}. "
+            "Run `pmai-evals setup-auth`."
+        )
+
+    async def ensure_authenticated(self) -> None:
+        """Confirm the saved storage state still grants access.
+
+        Cookies are the authoritative signal — if ``access_token`` /
+        ``refresh_token`` / ``csrf_token`` are present on the context,
+        the session is usable. No navigation or UI probe needed; stale
+        tokens will surface as an auth failure on the first real action.
+        """
+
+        await self._wait_for_auth_cookies(timeout_s=2.0)
 
     async def new_chat(self, *, model: str, project: str) -> ChatSession:
         """Open a fresh page and prepare a new chat for one rollout."""
@@ -157,6 +171,8 @@ class PMBrowser:
                 ).wait_for(timeout=30_000)
             except Exception as exc:
                 raise AuthError("login did not reach the dashboard") from exc
+
+            await self._wait_for_auth_cookies(timeout_s=10.0)
 
             self._storage_state.parent.mkdir(parents=True, exist_ok=True)
             await self._context.storage_state(path=str(self._storage_state))

@@ -34,7 +34,7 @@ from pmai_evals.schemas import (
     RunRecord,
     RunSummary,
 )
-from pmai_evals.trace import load_trace
+from pmai_evals.trace import parse_trace
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +118,6 @@ async def run_matrix(
         environment={
             "pm_frontend_url": settings.pm_frontend_url,
             "pm_agent_url": settings.pm_agent_url,
-            "pm_db_path": str(settings.pm_db_path),
         },
     )
     _write_run_json(run_dir, record)
@@ -232,6 +231,12 @@ async def _run_one(
             chat_id = chat.chat_id
 
             try:
+                history = await chat.fetch_history()
+            except BrowserError as exc:
+                logger.warning("chat history fetch failed: %s", exc)
+                history = []
+
+            try:
                 viewer_state = await chat.get_viewer_state()
             except BrowserError as exc:
                 logger.warning("viewer state fetch failed: %s", exc)
@@ -255,9 +260,9 @@ async def _run_one(
             await chat.close()
 
         if not chat_id:
-            raise BrowserError("chat_id was never populated; can't load trace")
+            raise BrowserError("chat_id was never populated; can't parse trace")
 
-        trace = load_trace(chat_id, settings.pm_db_path)
+        trace = parse_trace(history, chat_id, model=entry.model)
         writer.write_trace(trace)
         writer.write_viewer_state(viewer_state)
         writer.write_final_answer(final_answer or trace.final_answer)

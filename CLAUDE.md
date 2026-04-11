@@ -2,6 +2,9 @@
 
 Evals for playmoleculeAI.
 
+## Coding guideliness
+When writing new code or refactoring, treat it as a clean slate: no backward compatibility layers, no legacy preservation, no transitional logic. Remove anything that's no longer needed rather than working around it.
+
 ## Relevant paths
 
 - **playmoleculeAI agentic code** (harness, agents, prompts, skills): `/fast_shared/users/carles/repos/acellera/playmoleculeAI`

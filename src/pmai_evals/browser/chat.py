@@ -1,14 +1,9 @@
 """ChatSession — one prompt, one rollout, one set of artifacts.
 
-ChatSession is single-use. After ``wait_for_completion``, fetch the
-artifacts you need (screenshot, viewer state, final answer), then close.
-Sending a second prompt through the same session is forbidden — open a
-fresh ``ChatSession`` instead. This keeps cross-case state leakage at zero.
-
-Completion detection (spec §4.2) has three fallbacks, checked in order:
-    1. ``Regenerate`` button enabled.
-    2. (TODO) Trace status flips to "completed" in SQLite.
-    3. Hard timeout.
+Single-use. After ``wait_for_completion``, fetch the artifacts you need
+(screenshot, viewer state, final answer, history), then close. Sending a
+second prompt through the same session is forbidden — open a fresh
+``ChatSession`` instead.
 """
 
 from __future__ import annotations
@@ -23,13 +18,12 @@ from typing import TYPE_CHECKING, Any
 from pmai_evals.browser import locators
 from pmai_evals.browser.fixtures import upload_fixtures_for_chat
 from pmai_evals.browser.observers import (
-    CHAT_ID_FROM_PAGE,
     PYODIDE_READY,
     SCREENSHOT_DATA_URI,
     VIEWER_STATE_JSON,
 )
 from pmai_evals.config import Settings
-from pmai_evals.errors import BrowserError, ChatTimeoutError
+from pmai_evals.errors import BrowserError, ChatTimeoutError, TraceParseError
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -96,33 +90,39 @@ class ChatSession:
                 pass
             await asyncio.sleep(0.5)
 
-        # Model picker. The exact UI affordance is open question §9.1; we
-        # try a best-effort role-based selection here. If the picker isn't
-        # present, log and continue — the agent will use whatever default
-        # the frontend is wired to.
-        try:
-            picker = self._page.get_by_role(
-                locators.MODEL_PICKER_BUTTON[0],
-                name=locators.MODEL_PICKER_BUTTON[1],
-            )
-            if await picker.count() > 0:
-                await picker.click()
-                await self._page.get_by_role("option", name=self._model).click()
-        except Exception as exc:
-            logger.debug("model picker not used (%s)", exc)
 
     async def upload_fixtures(self, fixtures: Sequence[Path]) -> None:
         await upload_fixtures_for_chat(self._page, list(fixtures), self._settings, self._project)
 
     async def send_prompt(self, prompt: str) -> None:
+        """Fill the prompt box, submit, and capture the chat_id.
+
+        The ``x-chat-id`` response header on ``POST /v3/agent/chat/rollout``
+        is the server's authoritative handle for the chat being created.
+        We mirror what the frontend's ``sendMessage.ts`` does: wrap the
+        Enter keystroke in ``expect_response`` and read the header the
+        moment it arrives.
+        """
+
         try:
             box = self._page.get_by_role(
                 locators.PROMPT_INPUT[0], name=locators.PROMPT_INPUT[1]
             )
             await box.fill(prompt)
-            await box.press("Enter")
+            async with self._page.expect_response(
+                lambda r: "rollout" in r.url, timeout=30_000
+            ) as info:
+                await box.press("Enter")
+            resp = await info.value
         except Exception as exc:
             raise BrowserError(f"could not submit prompt: {exc}") from exc
+
+        chat_id = resp.headers.get("x-chat-id", "")
+        if not chat_id:
+            raise BrowserError(
+                f"rollout response had no x-chat-id header; status={resp.status}"
+            )
+        self._chat_id = chat_id
 
     async def wait_for_completion(self, *, timeout_s: int) -> CompletionStatus:
         """Block until the run finishes or times out.
@@ -153,18 +153,60 @@ class ChatSession:
                 f"Regenerate button never appeared within {timeout_s}s"
             ) from exc
 
-        # Capture chat_id while we're here. The runner needs it to query
-        # the trace DB.
-        try:
-            cid = await self._page.evaluate(CHAT_ID_FROM_PAGE)
-            if isinstance(cid, str) and cid:
-                self._chat_id = cid
-        except Exception as exc:
-            logger.debug("chat_id extraction failed: %s", exc)
-
         return CompletionStatus.completed
 
     # ---- observers ------------------------------------------------------
+
+    async def fetch_history(self) -> list[dict[str, Any]]:
+        """Return the full chat history from ``GET /v3/agent/chat/{id}``.
+
+        Call after ``send_prompt`` (so ``chat_id`` is set) and before
+        ``delete_chat``.
+        """
+
+        if not self._chat_id:
+            raise BrowserError("chat_id is empty; call send_prompt first")
+        resp = await self._chat_api_request("GET")
+        if not resp.ok:
+            body = ""
+            try:
+                body = (await resp.text())[:200]
+            except Exception:
+                pass
+            raise BrowserError(
+                f"chat history fetch failed: status={resp.status} body={body!r}"
+            )
+        try:
+            data = await resp.json()
+        except Exception as exc:
+            raise TraceParseError(f"chat history body was not JSON: {exc}") from exc
+        if not isinstance(data, list):
+            raise TraceParseError(
+                f"chat history response shape unexpected: got {type(data).__name__}"
+            )
+        return data
+
+    async def _chat_api_request(self, method: str) -> Any:
+        """Call ``/v3/agent/chat/{chat_uid}`` with the required CSRF header.
+
+        The backend uses a double-submit cookie CSRF scheme: the client
+        must echo the ``csrf_token`` cookie value in an ``X-CSRF-Token``
+        header. ``page.request`` sends cookies but not derived headers,
+        so we add it explicitly.
+        """
+        url = f"{self._settings.pm_frontend_url}/v3/agent/chat/{self._chat_id}"
+        headers = {"X-CSRF-Token": await self._read_csrf_token()}
+        try:
+            return await self._page.request.fetch(url, method=method, headers=headers)
+        except Exception as exc:
+            raise BrowserError(f"{method} {url} failed: {exc}") from exc
+
+    async def _read_csrf_token(self) -> str:
+        cookies = await self._page.context.cookies(self._settings.pm_frontend_url)
+        for cookie in cookies:
+            if cookie.get("name") == "csrf_token":
+                return cookie.get("value") or ""
+        return ""
 
     async def get_viewer_state(self) -> dict[str, Any]:
         """Return the in-page systems_tree as a Python dict."""
@@ -232,16 +274,13 @@ class ChatSession:
     # ---- teardown -------------------------------------------------------
 
     async def delete_chat(self) -> None:
-        """Open the history menu and delete this chat. Best-effort."""
+        """Soft-delete this chat via ``DELETE /v3/agent/chat/{id}``. Best-effort."""
+        if not self._chat_id:
+            return
         try:
-            await self._page.get_by_role(
-                locators.SHOW_HISTORY_BUTTON[0], name=locators.SHOW_HISTORY_BUTTON[1]
-            ).click()
-            menuitem = self._page.get_by_role("menuitem").first
-            await menuitem.locator(".MuiIconButton-edgeEnd").click()
-            await self._page.get_by_role(
-                locators.DELETE_MENUITEM[0], name=locators.DELETE_MENUITEM[1]
-            ).click()
+            resp = await self._chat_api_request("DELETE")
+            if not resp.ok:
+                logger.debug("delete_chat %s returned %s", self._chat_id, resp.status)
         except Exception as exc:
             logger.debug("delete_chat failed: %s", exc)
 

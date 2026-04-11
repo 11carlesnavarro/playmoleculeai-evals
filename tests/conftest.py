@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import sqlite3
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -95,147 +92,28 @@ def artifact_with_trace(writer: RunArtifactWriter):
 
 
 @pytest.fixture
-def trace_db(tmp_path: Path) -> Path:
-    """Create a tiny SQLite DB matching the agent schema."""
-    db_path = tmp_path / "agent.db"
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.executescript(
-            """
-            CREATE TABLE chats (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                chat_uid TEXT NOT NULL,
-                user_id TEXT,
-                project TEXT,
-                parent_id INTEGER,
-                summary TEXT,
-                instructions TEXT,
-                created_at TEXT,
-                deleted_at TEXT
-            );
-            CREATE TABLE messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                message_uid TEXT,
-                chat_id INTEGER NOT NULL,
-                parent_id INTEGER,
-                response_id TEXT,
-                item_index INTEGER,
-                item_data TEXT,
-                created_at TEXT,
-                rating INTEGER,
-                model TEXT,
-                usage TEXT,
-                start_time TEXT,
-                first_token_time TEXT,
-                end_time TEXT,
-                latency_ms INTEGER,
-                ttft_ms INTEGER,
-                tool_latency REAL,
-                status TEXT
-            );
-            """
-        )
-        now = datetime.now(UTC).isoformat()
-        conn.execute(
-            "INSERT INTO chats (chat_uid, user_id, project, summary, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            ("test-chat-uid", "user-1", "pmai-evals", "test chat", now),
-        )
-        chat_pk = conn.execute("SELECT id FROM chats").fetchone()[0]
-
-        # User prompt
-        conn.execute(
-            "INSERT INTO messages (chat_id, response_id, item_index, item_data, model, usage, "
-            "latency_ms, ttft_ms, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (
-                chat_pk,
-                "resp-1",
-                0,
-                json.dumps(
-                    {"type": "message", "role": "user", "text": "Load 1CRN"}
-                ),
-                None,
-                None,
-                None,
-                None,
-                None,
-                now,
-            ),
-        )
-        # Function call
-        conn.execute(
-            "INSERT INTO messages (chat_id, response_id, item_index, item_data, model, usage, "
-            "latency_ms, ttft_ms, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (
-                chat_pk,
-                "resp-2",
-                1,
-                json.dumps(
-                    {
-                        "type": "function_call",
-                        "name": "pmview_load",
-                        "call_id": "call-1",
-                        "arguments": json.dumps({"identifier": "1CRN"}),
-                    }
-                ),
-                "test-model",
-                json.dumps({"input_tokens": 50, "output_tokens": 20}),
-                500,
-                100,
-                None,
-                now,
-            ),
-        )
-        # Function call output
-        conn.execute(
-            "INSERT INTO messages (chat_id, response_id, item_index, item_data, model, usage, "
-            "latency_ms, ttft_ms, tool_latency, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                chat_pk,
-                "resp-2",
-                2,
-                json.dumps(
-                    {
-                        "type": "function_call_output",
-                        "call_id": "call-1",
-                        "output": "loaded 1CRN",
-                    }
-                ),
-                None,
-                None,
-                None,
-                None,
-                0.25,
-                None,
-                now,
-            ),
-        )
-        # Assistant final
-        conn.execute(
-            "INSERT INTO messages (chat_id, response_id, item_index, item_data, model, usage, "
-            "latency_ms, ttft_ms, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (
-                chat_pk,
-                "resp-3",
-                3,
-                json.dumps(
-                    {
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [
-                            {"type": "output_text", "text": "Loaded 1CRN successfully."}
-                        ],
-                    }
-                ),
-                "test-model",
-                json.dumps({"input_tokens": 60, "output_tokens": 30}),
-                400,
-                None,
-                None,
-                now,
-            ),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    return db_path
+def sample_history() -> list[dict[str, Any]]:
+    """A representative ``GET /v3/agent/chat/{id}`` response payload."""
+    return [
+        {"type": "message", "role": "user", "text": "Load 1CRN", "id": "resp-1"},
+        {
+            "type": "function_call",
+            "name": "pmview_load",
+            "call_id": "call-1",
+            "arguments": {"identifier": "1CRN"},
+            "id": "resp-2",
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call-1",
+            "output": "loaded 1CRN",
+            "is_error": False,
+            "id": "resp-2",
+        },
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "Loaded 1CRN successfully."}],
+            "id": "resp-3",
+        },
+    ]

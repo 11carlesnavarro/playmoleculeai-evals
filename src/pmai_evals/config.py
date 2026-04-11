@@ -22,9 +22,6 @@ class Settings(BaseSettings):
     pm_frontend_url: str = "http://localhost:5173"
     pm_backend_url: str = "http://localhost:8000"
     pm_agent_url: str = "http://localhost:8102"
-    pm_db_path: Path = Path(
-        "/fast_shared/users/carles/data/playmoleculeAIdata/data/databases/dev/agent.db"
-    )
 
     # --- auth ---
     pm_email: str | None = None

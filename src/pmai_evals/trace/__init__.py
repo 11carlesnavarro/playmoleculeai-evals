@@ -1,12 +1,13 @@
-"""Read-only access to the agent's SQLite trace database."""
+"""Parsed traces returned by the agent's HTTP chat-history endpoint."""
 
-from pmai_evals.trace.reader import load_trace
+from pmai_evals.trace.http_reader import parse_trace
 from pmai_evals.trace.schemas import (
     Message,
     TimingMetrics,
     TokenUsage,
     ToolCall,
     Trace,
+    TraceStatus,
 )
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "TokenUsage",
     "ToolCall",
     "Trace",
-    "load_trace",
+    "TraceStatus",
+    "parse_trace",
 ]
