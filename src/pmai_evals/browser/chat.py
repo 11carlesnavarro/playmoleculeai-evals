@@ -10,13 +10,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pmai_evals.browser import locators
-from pmai_evals.browser.fixtures import upload_fixtures_for_chat
 from pmai_evals.browser.observers import (
     PYODIDE_READY,
     SCREENSHOT_DATA_URI,
@@ -90,9 +88,6 @@ class ChatSession:
                 pass
             await asyncio.sleep(0.5)
 
-
-    async def upload_fixtures(self, fixtures: Sequence[Path]) -> None:
-        await upload_fixtures_for_chat(self._page, list(fixtures), self._settings, self._project)
 
     async def send_prompt(self, prompt: str) -> None:
         """Fill the prompt box, submit, and capture the chat_id.

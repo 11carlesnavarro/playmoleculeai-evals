@@ -86,6 +86,42 @@ class RubricDimensionSpec(BaseModel):
     scale: tuple[int, int] = (1, 5)
 
 
+class ProjectPreload(BaseModel):
+    """Files to upload into the project bucket before the prompt runs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    files: list[str] = Field(default_factory=list)
+
+
+class ViewerPreload(BaseModel):
+    """Structures to drop into Molstar before the prompt runs.
+
+    ``pdb_ids`` are fetched through the Get PDB dialog; ``files`` are
+    pushed through the hidden ``#raised-button-file`` input. Neither is
+    persisted to the project bucket — use :class:`ProjectPreload` for that.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    pdb_ids: list[str] = Field(default_factory=list)
+    files: list[str] = Field(default_factory=list)
+
+
+class PreloadSpec(BaseModel):
+    """Scenario state the runner materializes before ``send_prompt``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    project: ProjectPreload = Field(default_factory=ProjectPreload)
+    viewer: ViewerPreload = Field(default_factory=ViewerPreload)
+
+    def is_empty(self) -> bool:
+        return not (
+            self.project.files or self.viewer.pdb_ids or self.viewer.files
+        )
+
+
 class CaseSpec(BaseModel):
     """One case in ``cases.yaml``. Validated on load."""
 
@@ -95,7 +131,7 @@ class CaseSpec(BaseModel):
     prompt: str
     difficulty: Literal["trivial", "easy", "medium", "hard"] = "easy"
     tags: list[str] = Field(default_factory=list)
-    fixtures: list[str] = Field(default_factory=list)
+    preload: PreloadSpec = Field(default_factory=PreloadSpec)
     timeout_s: int | None = None
     expected_cost_usd: float | None = None
     assertions: list[AssertionSpec] = Field(default_factory=list)

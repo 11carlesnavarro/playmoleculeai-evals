@@ -55,11 +55,11 @@ def load_eval_set(eval_set_id: str, *, root: Path | None = None) -> EvalSet:
                 raise AssertionConfigError(
                     f"case '{case.id}': unknown assertion type '{assertion.type}'"
                 )
-        for fixture in case.fixtures:
+        for fixture in (*case.preload.project.files, *case.preload.viewer.files):
             fpath = base / "fixtures" / fixture
             if not fpath.exists():
                 raise EvalSetLoadError(
-                    f"case '{case.id}': missing fixture {fpath}"
+                    f"case '{case.id}': missing preload fixture {fpath}"
                 )
 
     return EvalSet(spec=spec, cases=cases, root=base)

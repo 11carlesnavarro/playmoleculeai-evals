@@ -13,6 +13,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from pmai_evals._io import write_json
+from pmai_evals.browser.project_files import open_file_browser, upload_to_project
+from pmai_evals.browser.viewer_loader import load_local_file, load_pdb_id
 from pmai_evals.config import Settings
 from pmai_evals.errors import (
     BrowserError,
@@ -30,6 +32,7 @@ from pmai_evals.schemas import (
     CaseStatus,
     CaseSummary,
     EvalSet,
+    PreloadSpec,
     RunConfig,
     RunRecord,
     RunSummary,
@@ -200,6 +203,28 @@ async def run_matrix(
 
 # --- per-case ---------------------------------------------------------------
 
+async def _preload_scenario(
+    page: object,  # playwright Page, untyped to keep the import out of module load
+    preload: PreloadSpec,
+    eval_set: EvalSet,
+) -> None:
+    """Materialize scenario state before the prompt is sent.
+
+    Project files are staged first so the File Browser panel is left open
+    on a populated grid, then viewer loads run — clicking "Add Files"
+    swaps the panel but leaves the project uploads persisted.
+    """
+    if preload.project.files:
+        await open_file_browser(page)  # type: ignore[arg-type]
+        for name in preload.project.files:
+            await upload_to_project(page, eval_set.fixture_path(name))  # type: ignore[arg-type]
+
+    for pdb_id in preload.viewer.pdb_ids:
+        await load_pdb_id(page, pdb_id)  # type: ignore[arg-type]
+    for name in preload.viewer.files:
+        await load_local_file(page, eval_set.fixture_path(name))  # type: ignore[arg-type]
+
+
 async def _run_one(
     *,
     browser: object,  # PMBrowser, untyped to avoid the cyclic import at module load
@@ -222,10 +247,8 @@ async def _run_one(
             model=entry.model, project=settings.pm_project
         )
         try:
-            if case.fixtures:
-                await chat.upload_fixtures(
-                    [eval_set.fixture_path(name) for name in case.fixtures]
-                )
+            if not case.preload.is_empty():
+                await _preload_scenario(chat.page, case.preload, eval_set)
             await chat.send_prompt(case.prompt)
             status_str = await chat.wait_for_completion(timeout_s=timeout_s)
             chat_id = chat.chat_id
