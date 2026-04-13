@@ -1,59 +1,63 @@
 # playmoleculeai-evals
 
-Evals for the playmoleculeAI agentic system. Browser-driven, multi-LLM, with
-both programmatic assertions and rubric-based LLM-as-judge grading.
+Evals for the playmoleculeAI agentic system. Browser-driven, multi-LLM,
+with deterministic assertions *and* rubric-based LLM-as-judge grading.
 
-The roadmap and architectural reasoning live in [`docs/plan.md`](docs/plan.md).
-The code contract (modules, interfaces, schemas, conventions) lives in
-[`docs/spec.md`](docs/spec.md). Read those first.
+Docs live in [`docs/`](docs/):
 
-## Quickstart
+- [`how-it-works.md`](docs/how-it-works.md) — pipeline tour. Start here.
+- [`writing-evals.md`](docs/writing-evals.md) — authoring guide for new cases and eval sets.
+- [`spec.md`](docs/spec.md) — code contract: modules, schemas, conventions.
+- [`plan.md`](docs/plan.md) — roadmap and architectural reasoning.
+
+## Install
 
 ```bash
-# 1. install
 uv sync
 uv run playwright install chromium
+cp .env.example .env && $EDITOR .env
+uv run pmai-evals setup-auth          # one-time login, saves storage_state.json
+```
 
-# 2. configure
-cp .env.example .env
-$EDITOR .env
+## Run an eval
 
-# 3. one-time login (saves storage_state.json)
-uv run pmai-evals setup-auth
+Three commands: `run` executes the agent and collects artifacts,
+`grade` scores them, `report` renders the result.
 
-# 4. dry run a cheap eval to validate the set
-uv run pmai-evals run --eval-set molecular-visualization --tier cheap --dry-run
+```bash
+# Dry-run first to validate the matrix.
+uv run pmai-evals run --eval-set molecular-visualization --cases load-1crn --dry-run
 
-# 5. real run + grade + report
-uv run pmai-evals run    --eval-set molecular-visualization --tier flagship
+# Real run (cheap tier), grade, report.
+uv run pmai-evals run    --eval-set molecular-visualization --cases load-1crn --tier cheap
 uv run pmai-evals grade  <run_id>
 uv run pmai-evals report <run_id>
 ```
+
+`<run_id>` is the directory name under `runs/`, printed at the end of
+`run`. Re-grading is free and re-runnable; re-running the agent is not.
 
 ## CLI
 
 | Command | Purpose |
 |---|---|
-| `setup-auth`            | Interactive login, saves `playwright/.auth/storage_state.json`. |
-| `run`                   | Execute the (case × model × seed) matrix and write artifacts under `runs/<run_id>/`. |
-| `grade`                 | Grade an existing run (assertions + LLM judge). Re-runnable. |
-| `report`                | Render markdown / HTML / JSON summaries from a graded run. |
-| `critique`              | "Grade the grader": flag non-discriminating or buggy assertions. |
+| `setup-auth` | Interactive login, saves `playwright/.auth/storage_state.json`. |
+| `run`        | Execute the `(case × model × seed)` matrix; write artifacts under `runs/<run_id>/`. |
+| `grade`      | Grade an existing run (assertions + LLM judge). Re-runnable with `--force`. |
+| `report`     | Render markdown / HTML / JSON summaries from a graded run. |
+| `critique`   | "Grade the grader": flag non-discriminating rubric dimensions. |
+| `list-models`| Print the model registry. |
 
-Exit codes:
+Exit codes: `0` success, `1` user error, `2` budget abort, `3`
+unrecoverable harness error.
 
-| Code | Meaning |
-|---|---|
-| `0` | success |
-| `1` | user error (bad args, missing eval set, ...) |
-| `2` | budget abort |
-| `3` | unrecoverable harness error |
+## Adding evals
 
-## Repository layout
+See [`docs/writing-evals.md`](docs/writing-evals.md). No code changes
+needed for a typical new case — it's YAML plus optional fixtures.
 
-See [`docs/spec.md`](docs/spec.md) §2.
+## Repo layout
 
-## Adding a new eval
-
-See [`docs/spec.md`](docs/spec.md) §9 — nine steps, no harness code changes
-required for a typical new eval.
+See [`docs/spec.md`](docs/spec.md) §2. Code lives under
+`src/pmai_evals/`, eval data under `eval_sets/`, run outputs under
+`runs/` (gitignored).
