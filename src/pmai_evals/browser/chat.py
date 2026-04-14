@@ -88,6 +88,39 @@ class ChatSession:
                 pass
             await asyncio.sleep(0.5)
 
+    async def select_model(self) -> None:
+        """Pick ``self._model`` via the Settings dialog."""
+        page = self._page
+        dialog = page.get_by_role(
+            locators.SETTINGS_DIALOG[0], name=locators.SETTINGS_DIALOG[1]
+        )
+        try:
+            await page.get_by_label(
+                locators.SETTINGS_BUTTON_LABEL, exact=True
+            ).click()
+            await dialog.wait_for()
+            await page.get_by_role(
+                locators.MODEL_SELECT[0], name=locators.MODEL_SELECT[1]
+            ).click()
+            target = page.get_by_role("option", name=self._model, exact=True)
+            if await target.count() == 0:
+                # Enumerate only on the failure path so the error message
+                # can name every option pmview actually offers.
+                available = [
+                    t.strip()
+                    for t in await page.get_by_role("option").all_inner_texts()
+                ]
+                raise BrowserError(
+                    f"model {self._model!r} not offered by pmview; "
+                    f"available: {available}"
+                )
+            await target.click()
+            await page.keyboard.press("Escape")
+            await dialog.wait_for(state="hidden")
+        except BrowserError:
+            raise
+        except Exception as exc:
+            raise BrowserError(f"model selection failed: {exc}") from exc
 
     async def send_prompt(self, prompt: str) -> None:
         """Fill the prompt box, submit, and capture the chat_id.
@@ -118,6 +151,16 @@ class ChatSession:
                 f"rollout response had no x-chat-id header; status={resp.status}"
             )
         self._chat_id = chat_id
+
+        # Guard against stale cookie / picker drift sending the wrong model.
+        body = resp.request.post_data_json
+        if not isinstance(body, dict):
+            raise BrowserError(f"rollout request body unreadable: {body!r}")
+        sent = body.get("model")
+        if sent != self._model:
+            raise BrowserError(
+                f"rollout used model {sent!r}, expected {self._model!r}"
+            )
 
     async def wait_for_completion(self, *, timeout_s: int) -> CompletionStatus:
         """Block until the run finishes or times out.

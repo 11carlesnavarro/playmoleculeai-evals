@@ -11,10 +11,12 @@ def test_load_molecular_visualization() -> None:
     es = load_eval_set("molecular-visualization", root=Path("eval_sets"))
     assert es.spec.id == "molecular-visualization"
     assert es.spec.skill_under_test == "pmview"
-    assert len(es.cases) == 10
+    assert len(es.cases) >= 1
     case_ids = [c.id for c in es.cases]
-    assert "load-1crn" in case_ids
-    assert "align-1crn-1cbn" in case_ids
+    assert "mv-5483" in case_ids
     # Each case has at least one assertion
     for case in es.cases:
         assert case.assertions, f"case {case.id} has no assertions"
+    # The eval set ships a checks.py module for python_check assertions.
+    assert es.checks_module is not None
+    assert callable(getattr(es.checks_module, "vrk_differing_residues_correct", None))

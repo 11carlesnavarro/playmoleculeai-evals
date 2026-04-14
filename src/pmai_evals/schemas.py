@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -162,6 +163,7 @@ class EvalSet(BaseModel):
     spec: EvalSetSpec
     cases: list[CaseSpec]
     root: Path
+    checks_module: ModuleType | None = None
 
     def fixture_path(self, name: str) -> Path:
         return self.root / "fixtures" / name

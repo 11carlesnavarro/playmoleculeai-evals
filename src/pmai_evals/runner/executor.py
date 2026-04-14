@@ -14,7 +14,12 @@ from pathlib import Path
 
 from pmai_evals._io import write_json
 from pmai_evals.browser.project_files import open_file_browser, upload_to_project
-from pmai_evals.browser.viewer_loader import load_local_file, load_pdb_id
+from pmai_evals.browser.viewer_loader import (
+    export_viewer_state,
+    list_system_names,
+    load_local_file,
+    load_pdb_id,
+)
 from pmai_evals.config import Settings
 from pmai_evals.errors import (
     BrowserError,
@@ -275,6 +280,12 @@ async def _run_one(
             except BrowserError as exc:
                 logger.warning("final answer fetch failed: %s", exc)
                 final_answer = ""
+
+            try:
+                if await list_system_names(chat.page):
+                    await export_viewer_state(chat.page, writer.systems_dir)
+            except BrowserError as exc:
+                logger.warning("systems export failed: %s", exc)
         finally:
             try:
                 await chat.delete_chat()

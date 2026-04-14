@@ -42,6 +42,11 @@ class PMBrowser:
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
+        # Tracks the last model picked in this context. The pmview frontend
+        # persists the choice via the ``PMAI_MODEL`` cookie, so once selected
+        # subsequent pages in the same context default to it — re-selecting
+        # per chat would just open and close the same dialog N times.
+        self._selected_model: str | None = None
 
     # ---- context manager ------------------------------------------------
 
@@ -142,6 +147,9 @@ class PMBrowser:
 
         chat = ChatSession(page=page, model=model, project=project, settings=self._settings)
         await chat.prepare()
+        if self._selected_model != model:
+            await chat.select_model()
+            self._selected_model = model
         return chat
 
     # ---- one-shot login (used by setup-auth) ----------------------------

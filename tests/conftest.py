@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -66,7 +67,7 @@ def artifact_with_trace(writer: RunArtifactWriter):
         *,
         final_answer: str = "",
         tool_calls: list[dict[str, Any]] | None = None,
-        viewer_state: dict[str, Any] | None = None,
+        viewer_state: Any = None,
         status: str = "completed",
     ) -> RunArtifact:
         trace = _make_trace_dict(

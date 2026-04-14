@@ -102,7 +102,9 @@ async def _grade_one(
     assertion_specs = [a.model_dump() for a in case.assertions]
 
     try:
-        assertion_results = run_assertions(artifact, assertion_specs)
+        assertion_results = run_assertions(
+            artifact, assertion_specs, checks_module=eval_set.checks_module
+        )
     except (KeyError, TypeError, ValueError) as exc:
         logger.exception("assertions crashed for %s", artifact.cell_dir)
         writer.write_grade(

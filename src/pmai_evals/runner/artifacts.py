@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 from typing import Any
@@ -83,6 +83,10 @@ class _CellPaths:
     def error_path(self) -> Path:
         return self.cell_dir / "error.txt"
 
+    @property
+    def systems_dir(self) -> Path:
+        return self.cell_dir / "systems"
+
 
 # --- writer ---------------------------------------------------------------
 
@@ -100,7 +104,7 @@ class RunArtifactWriter(_CellPaths):
         self.cell_dir.mkdir(parents=True, exist_ok=True)
         self.final_answer_path.write_text(text.rstrip("\n") + "\n", encoding="utf-8")
 
-    def write_viewer_state(self, state: dict[str, Any]) -> None:
+    def write_viewer_state(self, state: Any) -> None:
         write_json(self.viewer_state_path, state)
 
     def write_metrics(self, metrics: dict[str, Any]) -> None:
@@ -134,12 +138,17 @@ class RunArtifact(_CellPaths):
     memoization saves significant JSON decoding on every grade pass.
     """
 
+    _loaded_systems: dict[str, Any] = field(
+        default_factory=dict, init=False, repr=False
+    )
+
     @cached_property
     def _trace(self) -> dict[str, Any]:
         return read_json_or(self.trace_path, {})
 
     @cached_property
-    def _viewer_state(self) -> dict[str, Any]:
+    def _viewer_state(self) -> Any:
+        """Pyodide systems_tree as parsed JSON — typically a list of dicts."""
         return read_json_or(self.viewer_state_path, {})
 
     @cached_property
@@ -155,7 +164,7 @@ class RunArtifact(_CellPaths):
     def trace(self) -> dict[str, Any]:
         return self._trace
 
-    def viewer_state(self) -> dict[str, Any]:
+    def viewer_state(self) -> Any:
         return self._viewer_state
 
     def metrics(self) -> dict[str, Any]:
@@ -173,6 +182,69 @@ class RunArtifact(_CellPaths):
         if not self.screenshot_path.exists():
             return None
         return self.screenshot_path.read_bytes()
+
+    # ---- systems (exported viewer state) -------------------------------
+
+    @cached_property
+    def _systems_export_dir(self) -> Path | None:
+        """Path to the extracted ``pmv_*`` directory inside ``systems/``.
+
+        ``export_viewer_state`` writes exactly one ``pmv_<timestamp>.zip``
+        per case and unzips it next to itself. We pick the extracted
+        directory (not the zip) because every reader wants files.
+        """
+        if not self.systems_dir.is_dir():
+            return None
+        for child in sorted(self.systems_dir.iterdir()):
+            if child.is_dir() and child.name.startswith("pmv_"):
+                return child
+        return None
+
+    @cached_property
+    def _system_files(self) -> list[tuple[str, Path]]:
+        from pmai_evals.browser.viewer_loader import strip_export_prefix
+
+        root = self._systems_export_dir
+        if root is None:
+            return []
+        out: list[tuple[str, Path]] = []
+        for path in sorted(root.rglob("*")):
+            if not path.is_file() or path.name == "config.pmv":
+                continue
+            logical = strip_export_prefix(path.stem)
+            out.append((logical, path))
+        return out
+
+    def system_files(self) -> list[tuple[str, Path]]:
+        """Return ``(logical_name, path)`` for each exported structure file.
+
+        Logical name is the pmview system name (prefix stripped, extension
+        dropped). Empty list if no export was captured for this cell.
+        """
+        return self._system_files
+
+    def load_system(self, name: str) -> Any:
+        """Return a moleculekit ``Molecule`` for the named system.
+
+        ``name`` is matched case-insensitively against the logical names
+        returned by :meth:`system_files`. Raises ``KeyError`` if not found.
+        Callers that want soft failure should check ``system_files()`` first.
+        """
+        cache = self._loaded_systems
+        key = name.lower()
+        if key in cache:
+            return cache[key]
+        for logical, path in self._system_files:
+            if logical.lower() == key:
+                from moleculekit.molecule import Molecule  # type: ignore[import-not-found]
+
+                mol = Molecule(str(path))
+                cache[key] = mol
+                return mol
+        available = [n for n, _ in self._system_files]
+        raise KeyError(
+            f"system {name!r} not in export; available: {available}"
+        )
 
 
 # --- discovery ------------------------------------------------------------

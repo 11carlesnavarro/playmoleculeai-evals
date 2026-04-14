@@ -11,13 +11,34 @@ cases:
       viewer:
         pdb_ids: ["3OP5", "2V62"]  # VRK1, VRK2
     assertions:
+      - type: viewer_system_count
+        op: ">="
+        value: 2
       - type: viewer_has_molecule
         identifier: "3OP5"
       - type: viewer_has_molecule
         identifier: "2V62"
-      - type: viewer_system_count
-        op: ">="
-        value: 2
       - type: no_tool_error
+      - type: system_has_representation
+        system: "2V62"
+        style: "ball-and-stick"
+        color: "#0000FF"
+      - type: system_representation_residues
+        system: "2V62"
+        style: "ball-and-stick"
+        min_count: 40
+      - type: systems_coaligned
+        reference: "3OP5"
+        mobile: "2V62"
+        selection: "protein and name CA"
+        max_distance_a: 5.0
+      - type: python_check
+        function: vrk_differing_residues_correct
+        kwargs:
+          reference: "3OP5"
+          mobile: "2V62"
+          chain: "A"
+          min_jaccard: 0.5
+          min_ground_truth: 40
     rubric:
       enabled: false

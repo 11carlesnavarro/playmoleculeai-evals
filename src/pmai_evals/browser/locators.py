@@ -15,6 +15,21 @@ REGENERATE_BUTTON: Final[tuple[str, str]] = ("button", "Regenerate")
 NEW_CHAT_BUTTON: Final[tuple[str, str]] = ("button", "New chat")
 ACCOUNT_BUTTON: Final[tuple[str, str]] = ("button", "Account")
 
+# Chat settings dialog hosts the model picker. The dropdown is a MUI
+# ``TextField select``, which renders as a ``combobox`` with accessible
+# name "Model"; each ``<MenuItem>`` becomes an ``option`` whose name is
+# the raw model id (pmview uses ``label === value``).
+#
+# ``SETTINGS_BUTTON_LABEL`` is matched via ``get_by_label`` rather than
+# ``get_by_role`` because molstar ships two ``<button title="Settings">``
+# controls in its viewer panel — both contribute to the role-based
+# accessible name and force a strict-mode violation. Only the MUI
+# IconButton has an explicit ``aria-label``, and ``get_by_label`` matches
+# labels, not tooltips, so this single string is unambiguous.
+SETTINGS_BUTTON_LABEL: Final[str] = "Settings"
+SETTINGS_DIALOG: Final[tuple[str, str]] = ("dialog", "Settings")
+MODEL_SELECT: Final[tuple[str, str]] = ("combobox", "Model")
+
 # Login form labels (used by setup-auth).
 EMAIL_LABEL: Final[str] = "Email"
 PASSWORD_LABEL: Final[str] = "Password"
