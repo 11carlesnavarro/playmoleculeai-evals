@@ -7,7 +7,7 @@ Docs live in [`docs/`](docs/):
 
 - [`how-it-works.md`](docs/how-it-works.md) — pipeline tour. Start here.
 - [`writing-evals.md`](docs/writing-evals.md) — authoring guide for new cases and eval sets.
-- [`spec.md`](docs/spec.md) — code contract: modules, schemas, conventions.
+- [`SPEC.md`](docs/SPEC.md) — what the harness must do and the shape of its outputs.
 - [`plan.md`](docs/plan.md) — roadmap and architectural reasoning.
 
 ## Install
@@ -26,12 +26,15 @@ Three commands: `run` executes the agent and collects artifacts,
 
 ```bash
 # Dry-run first to validate the matrix.
-uv run pmai-evals run --eval-set molecular-visualization --cases load-1crn --dry-run
+uv run pmai-evals run --eval-set molecular-visualization --case mv-5483 --dry-run
 
 # Real run (cheap tier), grade, report.
-uv run pmai-evals run    --eval-set molecular-visualization --cases load-1crn --tier cheap
+uv run pmai-evals run    --eval-set molecular-visualization --case mv-5483 --tier cheap
 uv run pmai-evals grade  <run_id>
 uv run pmai-evals report <run_id>
+
+# Or chain them in one shot (--auto-report implies --auto-grade):
+uv run pmai-evals run --eval-set molecular-visualization --case mv-5483 --tier cheap --auto-report
 ```
 
 `<run_id>` is the directory name under `runs/`, printed at the end of
@@ -58,6 +61,6 @@ needed for a typical new case — it's YAML plus optional fixtures.
 
 ## Repo layout
 
-See [`docs/spec.md`](docs/spec.md) §2. Code lives under
-`src/pmai_evals/`, eval data under `eval_sets/`, run outputs under
-`runs/` (gitignored).
+Code lives under `src/pmai_evals/`, eval data under `eval_sets/`, run
+outputs under `runs/` (gitignored). The contract those outputs must
+satisfy is in [`docs/SPEC.md`](docs/SPEC.md).

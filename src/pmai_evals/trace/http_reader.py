@@ -1,15 +1,14 @@
 """Parse an agent trace returned by the HTTP endpoint.
 
-The backend exposes ``GET /v3/agent/chat/{chat_uid}`` which returns the
-chat history as a list of Responses-API items (the parsed ``item_data``
-blob for each row, with ``id``, ``created_at`` and ``rating`` merged in).
-See ``playmoleculeAI/apps/agent/models/messages.py::get_chat_history``.
+We call ``GET /v3/agent/chat/{chat_uid}?full=true``, which returns the
+raw ``messages`` rows. Each row carries a JSON-encoded Responses-API
+item under ``item_data`` plus the per-message ``usage`` / ``latency_ms``
+/ ``ttft_ms`` / ``tool_latency`` / ``model`` / ``status`` columns the
+dashboard reads, so token counts and timings round-trip cleanly into
+the trace.
 
-The HTTP endpoint intentionally does **not** expose the per-message
-``usage`` / ``latency`` / ``model`` / ``status`` columns that the SQLite
-schema stores separately. Token usage, timing metrics and cost will
-therefore be zero in traces produced by this reader — that's a
-known limitation, flagged in ``docs/plan.md`` §5.
+The parser also tolerates the legacy parsed-item shape (no
+``item_data`` key) for unit-test fixtures.
 """
 
 from __future__ import annotations
@@ -29,7 +28,6 @@ from pmai_evals.trace.schemas import (
 
 
 def _payload_text(payload: dict[str, Any]) -> str | None:
-    """Best-effort extraction of human-readable text from a Responses item."""
     for key in ("text", "output_text"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
@@ -61,19 +59,58 @@ def _payload_role(payload: dict[str, Any]) -> str:
     return "unknown"
 
 
+def _unwrap(row: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    raw = row.get("item_data")
+    if not isinstance(raw, str):
+        return row, {}
+    try:
+        item = json.loads(raw)
+    except Exception:
+        item = {}
+    if not isinstance(item, dict):
+        item = {}
+    if isinstance(row.get("response_id"), str):
+        item["id"] = row["response_id"]
+    if row.get("created_at") is not None:
+        item["created_at"] = row["created_at"]
+    if row.get("rating") is not None:
+        item["rating"] = row["rating"]
+    return item, row
+
+
+def _add_usage(meta: dict[str, Any], totals: dict[str, int]) -> None:
+    raw = meta.get("usage")
+    if not isinstance(raw, str) or not raw:
+        return
+    try:
+        usage = json.loads(raw)
+    except Exception:
+        return
+    if not isinstance(usage, dict):
+        return
+    totals["input_tokens"] += int(usage.get("input_tokens") or 0)
+    totals["output_tokens"] += int(usage.get("output_tokens") or 0)
+    cached = usage.get("cached_tokens")
+    if cached is None:
+        details = usage.get("input_tokens_details")
+        if isinstance(details, dict):
+            cached = details.get("cached_tokens")
+    totals["cached_tokens"] += int(cached or 0)
+    reasoning = usage.get("reasoning_tokens")
+    if reasoning is None:
+        details = usage.get("output_tokens_details")
+        if isinstance(details, dict):
+            reasoning = details.get("reasoning_tokens")
+    totals["reasoning_tokens"] += int(reasoning or 0)
+
+
 def parse_trace(
     history: list[dict[str, Any]],
     chat_id: str,
     *,
     model: str | None = None,
 ) -> Trace:
-    """Transform the HTTP chat-history response into a :class:`Trace`.
-
-    ``history`` is the JSON list returned by ``GET /v3/agent/chat/{id}``.
-    ``model`` is the requested model id from the case (applied uniformly
-    to every message, since the HTTP endpoint doesn't expose per-message
-    model). Usage and timing fields are zeroed — see module docstring.
-    """
+    """Transform the HTTP chat-history response into a :class:`Trace`."""
 
     messages: list[Message] = []
     tool_calls: list[ToolCall] = []
@@ -81,15 +118,26 @@ def parse_trace(
     last_assistant_text: str | None = None
     saw_error = False
 
-    for turn_index, item in enumerate(history):
-        if not isinstance(item, dict):
-            continue
+    usage_totals = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cached_tokens": 0,
+        "reasoning_tokens": 0,
+    }
+    total_ms = 0
+    ttft_ms: int | None = None
+    tool_latency_ms = 0
+
+    for turn_index, row in enumerate(history):
+        item, meta = _unwrap(row)
 
         payload_type = str(item.get("type") or "message")
         role = _payload_role(item)
         text_value = _payload_text(item)
         response_id = str(item.get("id") or "")
         created_at = item.get("created_at")
+        msg_model = meta.get("model") if isinstance(meta.get("model"), str) else None
+        msg_status = meta.get("status") if isinstance(meta.get("status"), str) else None
 
         messages.append(
             Message(
@@ -100,11 +148,23 @@ def parse_trace(
                 type=payload_type,
                 text=text_value,
                 payload=item,
-                model=model,
+                model=msg_model or model,
                 created_at=str(created_at) if created_at else None,
-                status=None,
+                status=msg_status,
             )
         )
+
+        _add_usage(meta, usage_totals)
+        latency = meta.get("latency_ms")
+        if isinstance(latency, (int, float)):
+            total_ms += int(latency)
+        if ttft_ms is None:
+            t = meta.get("ttft_ms")
+            if isinstance(t, (int, float)) and t > 0:
+                ttft_ms = int(t)
+        tool_lat = meta.get("tool_latency")
+        if isinstance(tool_lat, (int, float)):
+            tool_latency_ms += int(round(tool_lat * 1000))
 
         if payload_type == "function_call":
             call_id = str(item.get("call_id") or item.get("id") or "")
@@ -140,13 +200,18 @@ def parse_trace(
             idx = pending_call_idx.pop(call_id, None)
             if idx is not None:
                 existing = tool_calls[idx]
+                call_latency = (
+                    int(round(tool_lat * 1000))
+                    if isinstance(tool_lat, (int, float))
+                    else existing.latency_ms
+                )
                 tool_calls[idx] = ToolCall(
                     call_id=existing.call_id,
                     name=existing.name,
                     arguments=existing.arguments,
                     output=output_str,
                     error=output_str if is_error else None,
-                    latency_ms=existing.latency_ms,
+                    latency_ms=call_latency,
                     turn_index=existing.turn_index,
                     is_error=is_error,
                 )
@@ -161,8 +226,10 @@ def parse_trace(
         model=model,
         messages=tuple(messages),
         tool_calls=tuple(tool_calls),
-        usage=TokenUsage(),
-        metrics=TimingMetrics(),
+        usage=TokenUsage(**usage_totals),
+        metrics=TimingMetrics(
+            ttft_ms=ttft_ms, total_ms=total_ms, tool_latency_ms=tool_latency_ms
+        ),
         final_answer=last_assistant_text or "",
         status=status,
         project=None,

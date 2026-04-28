@@ -287,10 +287,6 @@ async def _run_one(
             except BrowserError as exc:
                 logger.warning("systems export failed: %s", exc)
         finally:
-            try:
-                await chat.delete_chat()
-            except BrowserError as exc:
-                logger.warning("delete_chat failed (ignored): %s", exc)
             await chat.close()
 
         if not chat_id:

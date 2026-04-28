@@ -124,6 +124,17 @@ def run(
         bool,
         typer.Option("--dry-run", help="Print manifest, do not execute"),
     ] = False,
+    auto_grade: Annotated[
+        bool,
+        typer.Option("--auto-grade", help="Grade the run when execution finishes"),
+    ] = False,
+    auto_report: Annotated[
+        bool,
+        typer.Option(
+            "--auto-report",
+            help="Render a markdown report after grading. Implies --auto-grade.",
+        ),
+    ] = False,
 ) -> None:
     """Run the (case × model × seed) matrix."""
 
@@ -184,8 +195,38 @@ def run(
         console.print("[yellow]  aborted over budget[/yellow]")
         raise typer.Exit(code=2)
 
+    if auto_grade or auto_report:
+        _grade_run(summary.run_id, settings, judge_model=judge_model)
+    if auto_report:
+        _render_report(summary.run_id, settings, fmt="markdown", out=None)
+
 
 # --- grade ----------------------------------------------------------------
+
+def _grade_run(
+    run_id: str,
+    settings: Settings,
+    *,
+    judge_model: str | None = None,
+    force: bool = False,
+    rubric_override: Path | None = None,
+) -> int:
+    from pmai_evals.grading.grade_run import grade_run_sync
+
+    try:
+        written = grade_run_sync(
+            run_id,
+            settings,
+            judge_model=judge_model,
+            rubric_override=rubric_override,
+            force=force,
+        )
+    except PMAIEvalsError as exc:
+        console.print(f"[red]grade error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    console.print(f"[green]graded {written} cells[/green] for run {run_id}")
+    return written
+
 
 @app.command()
 def grade(
@@ -201,24 +242,42 @@ def grade(
     ] = None,
 ) -> None:
     """Grade an existing run. Re-runnable."""
-    from pmai_evals.grading.grade_run import grade_run_sync
-
-    settings = _settings()
-    try:
-        written = grade_run_sync(
-            run_id,
-            settings,
-            judge_model=judge_model,
-            rubric_override=rubric,
-            force=force,
-        )
-    except PMAIEvalsError as exc:
-        console.print(f"[red]grade error:[/red] {exc}")
-        raise typer.Exit(code=1) from exc
-    console.print(f"[green]graded {written} cells[/green] for run {run_id}")
+    _grade_run(
+        run_id,
+        _settings(),
+        judge_model=judge_model,
+        force=force,
+        rubric_override=rubric,
+    )
 
 
 # --- report ---------------------------------------------------------------
+
+def _render_report(
+    run_id: str,
+    settings: Settings,
+    *,
+    fmt: str,
+    out: Path | None,
+) -> None:
+    run_dir = settings.results_dir / run_id
+    if not run_dir.is_dir():
+        console.print(f"[red]run not found:[/red] {run_dir}")
+        raise typer.Exit(code=1)
+
+    benchmark = aggregate_run(run_dir)
+    renderers = {"markdown": render_markdown, "html": render_html, "json": render_json}
+    if fmt not in renderers:
+        console.print(f"[red]unknown format:[/red] {fmt}")
+        raise typer.Exit(code=1)
+    body = renderers[fmt](benchmark)
+
+    if out is not None:
+        out.write_text(body, encoding="utf-8")
+        console.print(f"[green]wrote {out}[/green]")
+    else:
+        sys.stdout.write(body)
+
 
 @app.command()
 def report(
@@ -233,28 +292,7 @@ def report(
     ] = None,
 ) -> None:
     """Render a benchmark report from a graded run."""
-    settings = _settings()
-    run_dir = settings.results_dir / run_id
-    if not run_dir.is_dir():
-        console.print(f"[red]run not found:[/red] {run_dir}")
-        raise typer.Exit(code=1)
-
-    benchmark = aggregate_run(run_dir)
-    if fmt == "markdown":
-        body = render_markdown(benchmark)
-    elif fmt == "html":
-        body = render_html(benchmark)
-    elif fmt == "json":
-        body = render_json(benchmark)
-    else:
-        console.print(f"[red]unknown format:[/red] {fmt}")
-        raise typer.Exit(code=1)
-
-    if out is not None:
-        out.write_text(body, encoding="utf-8")
-        console.print(f"[green]wrote {out}[/green]")
-    else:
-        sys.stdout.write(body)
+    _render_report(run_id, _settings(), fmt=fmt, out=out)
 
 
 # --- critique -------------------------------------------------------------

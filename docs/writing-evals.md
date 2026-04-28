@@ -245,11 +245,11 @@ free and deterministic.
 2. Add any fixtures to `eval_sets/<set>/fixtures/`.
 3. Dry-run to confirm the YAML parses and the case is in the matrix:
    ```bash
-   uv run pmai-evals run --eval-set <set> --cases <new-id> --dry-run
+   uv run pmai-evals run --eval-set <set> --case <new-id> --dry-run
    ```
 4. Run it for real on the cheapest model:
    ```bash
-   uv run pmai-evals run --eval-set <set> --cases <new-id> --tier cheap
+   uv run pmai-evals run --eval-set <set> --case <new-id> --tier cheap
    ```
 5. Inspect the cell directory under `runs/<run_id>/<new-id>/...`.
    Look at `trace.json`, `viewer_state.json`, and `screenshot.png`

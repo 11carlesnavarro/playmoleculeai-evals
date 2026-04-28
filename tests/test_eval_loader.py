@@ -19,4 +19,5 @@ def test_load_molecular_visualization() -> None:
         assert case.assertions, f"case {case.id} has no assertions"
     # The eval set ships a checks.py module for python_check assertions.
     assert es.checks_module is not None
-    assert callable(getattr(es.checks_module, "vrk_differing_residues_correct", None))
+    assert callable(getattr(es.checks_module, "mv5483_alignment", None))
+    assert callable(getattr(es.checks_module, "mv5483_diff_residues_highlighted", None))

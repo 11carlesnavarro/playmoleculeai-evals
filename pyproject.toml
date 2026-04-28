@@ -84,7 +84,7 @@ reportUnknownVariableType = false
 reportUnknownArgumentType = false
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "eval_sets"]
 asyncio_mode = "auto"
 markers = [
     "browser: integration test that launches a real browser",

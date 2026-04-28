@@ -118,5 +118,5 @@ change, not a harness change.
 ## Where to look next
 
 - **Author an eval** → [`writing-evals.md`](writing-evals.md)
-- **Change how the code is organised** → [`spec.md`](spec.md) (the code contract)
+- **Check what the harness must do and produce** → [`SPEC.md`](SPEC.md)
 - **Understand the roadmap** → [`plan.md`](plan.md)

@@ -3,42 +3,17 @@ cases:
   - id: mv-5483
     difficulty: medium
     prompt: |
-      show the VRK2 structure , aligned to the VRK1 and with residues
-      that differs in ball and stick color in blue
-    tags: [align, compare, highlight, scenario]
+      Show VRK2 (2V62) aligned to VRK1 (3OP5), and highlight in
+      ball-and-stick (blue) the residues that differ between them.
+    tags: [align, compare, highlight]
     timeout_s: 480
     preload:
       viewer:
-        pdb_ids: ["3OP5", "2V62"]  # VRK1, VRK2
+        pdb_ids: ["3OP5", "2V62"]
     assertions:
-      - type: viewer_system_count
-        op: ">="
-        value: 2
-      - type: viewer_has_molecule
-        identifier: "3OP5"
-      - type: viewer_has_molecule
-        identifier: "2V62"
-      - type: no_tool_error
-      - type: system_has_representation
-        system: "2V62"
-        style: "ball-and-stick"
-        color: "#0000FF"
-      - type: system_representation_residues
-        system: "2V62"
-        style: "ball-and-stick"
-        min_count: 40
-      - type: systems_coaligned
-        reference: "3OP5"
-        mobile: "2V62"
-        selection: "protein and name CA"
-        max_distance_a: 5.0
       - type: python_check
-        function: vrk_differing_residues_correct
-        kwargs:
-          reference: "3OP5"
-          mobile: "2V62"
-          chain: "A"
-          min_jaccard: 0.5
-          min_ground_truth: 40
+        function: mv5483_alignment
+      - type: python_check
+        function: mv5483_diff_residues_highlighted
     rubric:
       enabled: false

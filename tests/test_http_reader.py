@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from pmai_evals.trace import parse_trace
@@ -76,3 +77,70 @@ def test_parse_trace_has_tool_call_helper(sample_history: list[dict[str, Any]]) 
     trace = parse_trace(sample_history, "test-chat-uid")
     assert trace.has_tool_call("pmview_load")
     assert not trace.has_tool_call("nonexistent")
+
+
+def _row(item: dict[str, Any], **meta: Any) -> dict[str, Any]:
+    return {
+        "item_data": json.dumps(item),
+        "response_id": item.get("id", "resp"),
+        **meta,
+    }
+
+
+def test_parse_trace_full_rows_extract_usage_and_timing() -> None:
+    history = [
+        _row(
+            {"type": "message", "role": "user", "text": "hi", "id": "r-1"},
+            model="gpt-x",
+            ttft_ms=420,
+            latency_ms=900,
+        ),
+        _row(
+            {
+                "type": "function_call",
+                "name": "pmview_load",
+                "call_id": "c-1",
+                "arguments": {"identifier": "1CRN"},
+                "id": "r-2",
+            },
+        ),
+        _row(
+            {
+                "type": "function_call_output",
+                "call_id": "c-1",
+                "output": "ok",
+                "is_error": False,
+                "id": "r-3",
+            },
+            tool_latency=0.250,
+        ),
+        _row(
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "done"}],
+                "id": "r-4",
+            },
+            model="gpt-x",
+            latency_ms=1500,
+            usage=json.dumps(
+                {
+                    "input_tokens": 1200,
+                    "output_tokens": 300,
+                    "input_tokens_details": {"cached_tokens": 800},
+                    "output_tokens_details": {"reasoning_tokens": 50},
+                }
+            ),
+            status="completed",
+        ),
+    ]
+    trace = parse_trace(history, "cid", model="gpt-x")
+    assert trace.usage.input_tokens == 1200
+    assert trace.usage.output_tokens == 300
+    assert trace.usage.cached_tokens == 800
+    assert trace.usage.reasoning_tokens == 50
+    assert trace.metrics.ttft_ms == 420
+    assert trace.metrics.total_ms == 2400  # 900 + 1500
+    assert trace.metrics.tool_latency_ms == 250
+    assert trace.tool_calls[0].latency_ms == 250
+    assert trace.final_answer == "done"

@@ -1,8 +1,9 @@
 # playmoleculeai-evals — Plan
 
-Evals for the playmoleculeAI agentic system for drug discovery. This document is
-the authoritative plan for *what* we are building and *why*. Code structure,
-style conventions, and interface shapes live in `docs/spec.md`.
+Evals for the playmoleculeAI agentic system for drug discovery. This
+document is the authoritative plan for *why* we are building this and
+the architectural choices behind it. The contract that any
+implementation must satisfy lives in `docs/SPEC.md`.
 
 ---
 
@@ -194,7 +195,7 @@ produces: final text answer, full trace, viewer state JSON, and screenshot.
 ### 7.1 Two paths, combined per case
 
 **Programmatic assertions** — cheap, deterministic, discriminating. First-pass
-assertion types (full list in `docs/spec.md` §5.2):
+assertion types (full catalog in `docs/SPEC.md` §7):
 
 - `output_contains`, `output_matches_regex`, `output_numeric_close`
 - `tool_called`, `tool_called_with`, `tool_call_count`, `tool_call_order`

@@ -198,8 +198,7 @@ class ChatSession:
     async def fetch_history(self) -> list[dict[str, Any]]:
         """Return the full chat history from ``GET /v3/agent/chat/{id}``.
 
-        Call after ``send_prompt`` (so ``chat_id`` is set) and before
-        ``delete_chat``.
+        Call after ``send_prompt`` so ``chat_id`` is set.
         """
 
         if not self._chat_id:
@@ -232,7 +231,7 @@ class ChatSession:
         header. ``page.request`` sends cookies but not derived headers,
         so we add it explicitly.
         """
-        url = f"{self._settings.pm_frontend_url}/v3/agent/chat/{self._chat_id}"
+        url = f"{self._settings.pm_frontend_url}/v3/agent/chat/{self._chat_id}?full=true"
         headers = {"X-CSRF-Token": await self._read_csrf_token()}
         try:
             return await self._page.request.fetch(url, method=method, headers=headers)
@@ -310,17 +309,6 @@ class ChatSession:
             return ""
 
     # ---- teardown -------------------------------------------------------
-
-    async def delete_chat(self) -> None:
-        """Soft-delete this chat via ``DELETE /v3/agent/chat/{id}``. Best-effort."""
-        if not self._chat_id:
-            return
-        try:
-            resp = await self._chat_api_request("DELETE")
-            if not resp.ok:
-                logger.debug("delete_chat %s returned %s", self._chat_id, resp.status)
-        except Exception as exc:
-            logger.debug("delete_chat failed: %s", exc)
 
     async def close(self) -> None:
         if self._closed:
