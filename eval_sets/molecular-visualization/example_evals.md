@@ -7,15 +7,6 @@ Prerequisites: load experimental `1IEP` and the uploaded docked pose from `outpu
 Why keep: strongest direct pose-validation task in the pool, with a numeric target and a visible overlay.
 Verification: computed ligand RMSD should match the docked-vs-experimental overlay within tolerance.
 
-2. `mv-5483`
-Prompt: `show the VRK2 structure , aligned to the VRK1 and with residues that differs in ball and stick color in blue`
-Category: comparative structure alignment
-Fixture: `scenario`
-Eval mode: `hybrid`
-Prerequisites: load the VRK1 and VRK2 structures from the `servier` trace context.
-Why keep: clean alignment-plus-difference-highlighting task that broadens coverage beyond ligand-pocket work.
-Verification: VRK2 should be superposed onto VRK1 and differing residues should appear in blue ball-and-stick.
-
 3. `mv-8144`
 Prompt: `so take in consideration of mettk3-mettl14 complex pdb id 5il1 so first find interface residue of mettl3 and mettl14`
 Category: protein-protein interface analysis

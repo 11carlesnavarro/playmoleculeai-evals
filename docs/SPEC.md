@@ -1,25 +1,5 @@
 # playmoleculeai-evals — Spec
 
-This document is the contract. It says what an implementation must do and what
-its outputs must look like, not how to build it. The roadmap, architectural
-reasoning, and implementation choices live in `docs/plan.md`.
-
-A correct implementation is one that:
-
-1. Accepts the inputs described in §3 (eval set on disk + run configuration).
-2. Drives the playmoleculeAI agent through a real browser session (§4).
-3. Produces the artifact tree described in §5, with the schemas in §6.
-4. Grades artifacts according to the assertion catalog in §7 and the judge
-   contract in §8.
-5. Aggregates and reports as described in §9.
-6. Honors the cross-cutting invariants in §10.
-
-Two independent implementations satisfying this spec must produce
-artifact trees and grade outcomes that agree, given the same inputs and a
-deterministic judge.
-
----
-
 ## 1. Glossary
 
 - **Eval set** — a directory of declarative YAML, fixtures, and optional
@@ -193,8 +173,8 @@ pmai-evals run --eval-set <id> [options]
 
 ### 3.8 Environment
 
-These environment variables (and their `.env` equivalents) are part of
-the spec:
+The harness reads the following environment variables (and their `.env`
+equivalents):
 
 | Variable | Purpose |
 |---|---|
@@ -526,17 +506,12 @@ An assertion is a pure function of the cell's artifacts and a config:
   the pass (e.g., a turn index, an offset, a value). On fail, evidence
   describes what was expected versus observed.
 - It must be discriminating: an assertion that passes for any output is
-  a spec violation.
-
-Adding a new assertion type requires defining its config shape and its
-deterministic semantics in this spec. Implementations may not introduce
-assertion types that are not specified here.
+  malformed.
 
 ### 7.2 Catalog
 
-The framework defines exactly one assertion type. Eval-set–specific
-predicates live in the eval set's `checks.py` and are referenced through
-`python_check`.
+There is exactly one assertion type. Eval-set–specific predicates live
+in the eval set's `checks.py` and are referenced through `python_check`.
 
 #### `python_check`
 
@@ -548,8 +523,8 @@ predicates live in the eval set's `checks.py` and are referenced through
 The function receives the cell artifact and the merged config (kwargs
 plus `function`) and must return an `AssertionResult`. A function that
 raises is reported as a fail with the exception class and message in
-`evidence`. A function that returns a non-`AssertionResult` value is a
-spec violation surfaced as an error at grade time.
+`evidence`. A function that returns a non-`AssertionResult` value
+surfaces as an error at grade time.
 
 ## 8. Judge contract
 
@@ -737,14 +712,12 @@ the ceiling do not retroactively fail completed cells.
 
 ### 10.5 Declarative eval addition
 
-Adding a new eval set must require only:
+Adding a new eval set requires only:
 
 1. Creating `eval_sets/<id>/` with `eval_set.yaml` and `cases.yaml`.
 2. Optionally adding fixtures, a `checks.py`, and a rubric.
 
-It must not require changes under the harness implementation. A change
-that adds a new assertion type, a new judge mode, or a new artifact
-shape is a spec change first, an implementation change second.
+No code outside `eval_sets/<id>/` changes when an eval set is added.
 
 ### 10.6 Determinism
 
@@ -781,7 +754,7 @@ Exit codes:
 
 ## 12. Adding a new eval
 
-A correct implementation supports this workflow without code changes:
+The workflow for adding a new eval set:
 
 1. Create `eval_sets/<name>/` with `eval_set.yaml` and `cases.yaml`.
 2. Drop fixtures into `eval_sets/<name>/fixtures/` if any case needs them.
@@ -790,7 +763,3 @@ A correct implementation supports this workflow without code changes:
    has `rubric.enabled: true`.
 5. Validate via `pmai-evals run --eval-set <name> --dry-run`.
 6. Run, grade, and report.
-
-If any of these steps requires editing the harness implementation, the
-implementation has drifted from this spec and must be repaired before
-the eval can be considered added.

@@ -3,8 +3,9 @@ cases:
   - id: mv-5483
     difficulty: medium
     prompt: |
-      Show VRK2 (2V62) aligned to VRK1 (3OP5), and highlight in
-      ball-and-stick (blue) the residues that differ between them.
+      Show chain A of VRK2 (2V62) aligned to chain A of VRK1 (3OP5),
+      and highlight in blue ball-and-stick the chain-A residues that
+      differ between them.
     tags: [align, compare, highlight]
     timeout_s: 480
     preload:
@@ -15,5 +16,21 @@ cases:
         function: mv5483_alignment
       - type: python_check
         function: mv5483_diff_residues_highlighted
+    rubric:
+      enabled: false
+
+  - id: mv-6316
+    difficulty: easy
+    prompt: |
+      Load 6FCX and highlight the active site (the protein residues
+      at 6 Å of the ligand SAH) in blue ball-and-stick.
+    tags: [load, active-site, highlight]
+    timeout_s: 360
+    preload:
+      viewer:
+        pdb_ids: ["6FCX"]
+    assertions:
+      - type: python_check
+        function: mv6316_active_site_highlighted
     rubric:
       enabled: false
