@@ -25,15 +25,6 @@ Prerequisites: keep `0AlphaFold2CpunCSP11.pdb` and `betapinene.sdf` loaded in th
 Why keep: combines geometric filtering, contact typing, and an exportable 2D artifact in one strong eval.
 Verification: listed contacts should respect the `4.0 Å` rule and the exported 2D map should match the visible interaction network.
 
-5. `mv-6316`
-Prompt: `please load 6fcx and highlight the active site`
-Category: active-site visualization
-Fixture: `standalone`
-Eval mode: `quantitative`
-Prerequisites: none beyond access to `6FCX`.
-Why keep: simple but durable baseline for load + site highlighting on a real enzyme.
-Verification: the active site around `FAD`/`SAH` should be highlighted and centered consistently.
-
 6. `mv-5499`
 Prompt: `Measure the distance betweent the sulfur atoms of A:V161C, B:V161C`
 Category: geometric measurement

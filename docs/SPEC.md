@@ -13,7 +13,7 @@
   directory containing all cells. Identified by a `run_id` of the form
   `YYYYMMDD-HHMMSS_<eval_set_id>_<label>` in UTC.
 - **Artifact** — a file produced by the harness for a cell or a run.
-  Artifacts are addressable by stable relative paths (§5).
+  Artifacts are addressable by stable relative paths ([5](#5-artifact-layout)).
 - **Rollout** — the act of executing one cell against the agent (one
   fresh chat, one prompt, one completion).
 - **Grade** — the verdict on a cell: a list of assertion results plus an
@@ -51,7 +51,7 @@ eval_sets/<id>/
 │   └── ...
 ├── checks.py              optional, required if any case uses python_check
 ├── rubric.md              optional, human-readable rubric
-└── rubric.yaml            optional, machine-readable rubric (see §3.5)
+└── rubric.yaml            optional, machine-readable rubric (see [3.5](#35-rubric))
 ```
 
 The eval set id in `eval_set.yaml` must equal the directory name.
@@ -82,13 +82,13 @@ cases:
     tags: [a, b]                # optional
     timeout_s: <int>            # optional, defaults to eval_set.default_timeout_s
     expected_cost_usd: <float>  # optional, advisory
-    preload:                    # optional, see §3.4
+    preload:                    # optional, see [3.4](#34-preload)
       project:
         files: [<fixture_name>]
       viewer:
         pdb_ids: [<pdb_id>]
         files: [<fixture_name>]
-    assertions:                 # optional list, see §7
+    assertions:                 # optional list, see [7](#7-assertion-catalog)
       - type: <assertion_type>
         ...type-specific config
     rubric:                     # optional
@@ -150,7 +150,7 @@ Optional. When present, it must expose top-level functions of signature
 
 referenced by `python_check` assertions in `cases.yaml`. Functions are
 imported once per eval set load. Each function must return an
-`AssertionResult` (§7.1) whose `evidence` field is non-empty.
+`AssertionResult` ([7.1](#71-assertion-contract)) whose `evidence` field is non-empty.
 
 ### 3.7 Run configuration (CLI)
 
@@ -206,7 +206,7 @@ browser turns those calls into failures.
 Observable requirements per cell:
 
 - A fresh chat is created. No chat is reused across cells.
-- Preload (§3.4) is materialized before the prompt is sent. Project
+- Preload ([3.4](#34-preload)) is materialized before the prompt is sent. Project
   uploads happen first, then viewer loads.
 - The case prompt is submitted exactly once.
 - The harness blocks until the chat reaches a terminal state, defined as
@@ -227,24 +227,24 @@ A run directory has this exact shape:
 
 ```
 <results_dir>/<run_id>/
-├── run.json                  per-run input snapshot (§6.1)
-├── manifest.json             planned cells (§6.2)
-├── cost.json                 cost journal (§6.3)
-├── summary.json              per-run output summary (§6.4)
-├── benchmark.json            written by `report` / aggregation (§9.1)
-├── critique.json             written by `critique` (§9.2)
+├── run.json                  per-run input snapshot ([6.1](#61-runjson))
+├── manifest.json             planned cells ([6.2](#62-manifestjson))
+├── cost.json                 cost journal ([6.3](#63-costjson))
+├── summary.json              per-run output summary ([6.4](#64-summaryjson))
+├── benchmark.json            written by `report` / aggregation ([9.1](#91-benchmarkjson))
+├── critique.json             written by `critique` ([9.2](#92-critiquejson))
 └── <case_id>/<model>/seed-<N>/
-    ├── trace.json            agent trace (§6.5)
+    ├── trace.json            agent trace ([6.5](#65-tracejson))
     ├── final_answer.md       last assistant message (UTF-8)
     ├── viewer_state.json     pmview systems_tree at completion
     ├── screenshot.png        molstar viewport image (PNG)
-    ├── metrics.json          token usage, timings, cost (§6.6)
+    ├── metrics.json          token usage, timings, cost ([6.6](#66-metricsjson))
     ├── status                one of: completed | failed | timed_out
     │                          | skipped_over_budget (plain text + newline)
     ├── error.txt             present iff status ∈ {failed, timed_out};
     │                          one or more lines of error context
     ├── systems/              optional; pmview structure export tree
-    └── grade.json            present iff the cell has been graded (§6.7)
+    └── grade.json            present iff the cell has been graded ([6.7](#67-gradejson))
 ```
 
 Rules:
@@ -447,7 +447,7 @@ are available; downstream consumers must tolerate zeros.
 ```
 
 `cost_usd` is computed from the token counts and the model registry
-(§3.8). Unknown model ids charge zero; this must be flagged at the call
+([3.8](#38-environment)). Unknown model ids charge zero; this must be flagged at the call
 site, never silently absorbed.
 
 ### 6.7 `grade.json`
@@ -752,14 +752,93 @@ Exit codes:
 | `2` | budget abort |
 | `3` | unrecoverable harness error |
 
-## 12. Adding a new eval
+## 12. Authoring evals
 
-The workflow for adding a new eval set:
+This section is normative: it describes how an eval set is composed and
+how a single case's grading is wired up.
 
-1. Create `eval_sets/<name>/` with `eval_set.yaml` and `cases.yaml`.
-2. Drop fixtures into `eval_sets/<name>/fixtures/` if any case needs them.
-3. Add `checks.py` if any case uses `python_check`.
-4. Add a rubric (markdown for humans, YAML for the judge) if any case
-   has `rubric.enabled: true`.
-5. Validate via `pmai-evals run --eval-set <name> --dry-run`.
-6. Run, grade, and report.
+### 12.1 Workflow
+
+1. Create `eval_sets/<id>/` with `eval_set.yaml` and `cases.yaml`
+   ([3.1](#31-eval-set)–[3.3](#33-casesyaml)).
+2. Drop fixtures into `eval_sets/<id>/fixtures/` if any case references
+   them.
+3. Add `checks.py` if any case has a `python_check` assertion.
+4. Add `rubric.md` / `rubric.yaml` if any case opts into the judge.
+5. Add tests for `checks.py` next to it (e.g. `test_checks.py`); they
+   are auto-discovered.
+6. Add a derivation script under `development/` for any computed
+   ground truth referenced from `checks.py` ([12.5](#125-reproducible-ground-truth)).
+7. Validate with `pmai-evals run --eval-set <id> --dry-run`, then run,
+   grade, and report.
+
+### 12.2 Where check code lives
+
+The harness ships exactly one assertion type, `python_check` ([7.2](#72-catalog)). All
+eval-set-specific verification logic lives in `checks.py` inside the
+eval-set directory. A case wires a check by name in `cases.yaml`:
+
+```yaml
+assertions:
+  - type: python_check
+    function: <name_of_a_function_in_checks_py>
+```
+
+`checks.py` is imported once at eval-set load. Every name listed under
+`python_check.function` must resolve to a top-level function in that
+module; missing references are an error at load time. There is no global
+registry, no decorator, and no plugin discovery: the function only has
+to be defined in `checks.py`.
+
+### 12.3 Designing a case
+
+A case has a single declared acceptance criterion. The criterion is what
+the check verifies, and writing it down precisely is what makes the case
+gradable.
+
+- Define the criterion before writing the check, in concrete structural
+  terms (objects produced, values reported, files written, tool calls
+  made).
+- When grading by exact match, the prompt must pin the answer to a
+  single objectively-computable result. A vague prompt graded by a
+  strict check fails on phrasing rather than capability.
+- When the prompt admits more than one biologically or operationally
+  equivalent answer, enumerate every valid answer and pass on the first
+  match.
+- Use the rubric for graded judgement, the `python_check` for
+  verifiable facts. The two are complementary.
+
+### 12.4 Writing the check
+
+Each check is a top-level function with the contract
+`(artifact, config) -> AssertionResult` ([3.6](#36-checkspy), [7.1](#71-assertion-contract)).
+
+- The check is a pure function of the cell's artifacts. It reads them
+  through the `RunArtifact` API (`viewer_state()`, `load_system(name)`,
+  trace, screenshots) and returns a verdict.
+- The check verifies the **meaning** of the agent's output, not the
+  surface text the agent produced. Any agent-authored string (selection
+  expression, file path, search query) is resolved against the
+  corresponding structured artifact before comparison.
+- Expected answers and thresholds are baked into the function.
+  `kwargs` in `cases.yaml` are reserved for checks genuinely shared
+  across parameterisations; one-off checks expose no configuration.
+- Evidence strings are mandatory on every return path and must describe
+  what was observed versus what was expected, in enough detail to debug
+  a failed case without rerunning it.
+
+### 12.5 Reproducible ground truth
+
+Hardcoded constants in `checks.py` (residue lists, expected values,
+fixed shapes) must be reproducible from inputs. When a constant is
+computed rather than typed by hand, the derivation lives as a script
+under `development/test_case_<id>.py`, and the constant in `checks.py`
+carries a comment naming the script. Re-running the script after the
+source data changes must regenerate the same constants verbatim.
+
+### 12.6 Tests
+
+`pyproject.toml` registers `eval_sets/` as a pytest path so `test_*.py`
+files inside an eval-set directory are auto-discovered. Eval-set tests
+cover the helpers in `checks.py`; the harness's grading dispatcher and
+contract are tested separately under `tests/`.
