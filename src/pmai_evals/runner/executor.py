@@ -13,7 +13,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from pmai_evals._io import write_json
-from pmai_evals.browser.project_files import open_file_browser, upload_to_project
+from pmai_evals.browser.project_files import (
+    close_file_browser,
+    open_file_browser,
+    upload_to_project,
+)
 from pmai_evals.browser.viewer_loader import (
     export_viewer_state,
     list_system_names,
@@ -168,7 +172,6 @@ async def run_matrix(
                         entry=entry,
                         eval_set=eval_set,
                         run_dir=run_dir,
-                        settings=settings,
                         budget=budget,
                     )
                     case_summaries.append(summary)
@@ -213,16 +216,12 @@ async def _preload_scenario(
     preload: PreloadSpec,
     eval_set: EvalSet,
 ) -> None:
-    """Materialize scenario state before the prompt is sent.
-
-    Project files are staged first so the File Browser panel is left open
-    on a populated grid, then viewer loads run — clicking "Add Files"
-    swaps the panel but leaves the project uploads persisted.
-    """
+    """Materialize scenario state before the prompt is sent."""
     if preload.project.files:
         await open_file_browser(page)  # type: ignore[arg-type]
         for name in preload.project.files:
             await upload_to_project(page, eval_set.fixture_path(name))  # type: ignore[arg-type]
+        await close_file_browser(page)  # type: ignore[arg-type]
 
     for pdb_id in preload.viewer.pdb_ids:
         await load_pdb_id(page, pdb_id)  # type: ignore[arg-type]
@@ -236,7 +235,6 @@ async def _run_one(
     entry: MatrixEntry,
     eval_set: EvalSet,
     run_dir: Path,
-    settings: Settings,
     budget: Budget,
 ) -> CaseSummary:
     case = entry.case
@@ -249,7 +247,7 @@ async def _run_one(
 
     try:
         chat = await browser.new_chat(  # type: ignore[attr-defined]
-            model=entry.model, project=settings.pm_project
+            model=entry.model
         )
         try:
             if not case.preload.is_empty():

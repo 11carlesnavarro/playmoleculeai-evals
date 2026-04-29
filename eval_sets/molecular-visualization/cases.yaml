@@ -19,6 +19,44 @@ cases:
     rubric:
       enabled: false
 
+  - id: mv-3830
+    difficulty: medium
+    prompt: |
+      Display the 1IEP complex and the docked poses from outlig0.sdf
+      in the viewer. Report the lowest RMSD of the docked poses
+      relative to the experimental ligand from the 1IEP crystal,
+      in Ångströms, between <answer>...</answer> tags,
+      e.g. <answer>1.40</answer>.
+    tags: [docking, rmsd]
+    timeout_s: 480
+    preload:
+      project:
+        files: ["outlig0.sdf"]
+    assertions:
+      - type: python_check
+        function: mv3830_rmsd_correct
+    rubric:
+      enabled: false
+
+  - id: mv-5499
+    difficulty: medium
+    prompt: |
+      Load 8AYF, mutate Val161 to Cys on both chains (A:V161C, B:V161C),
+      show the mutated cysteines as ball-and-stick in the viewer, then
+      measure the distance between the sulfur atoms (SG of A:CYS161 and
+      SG of B:CYS161). Report the result in Ångströms between
+      <answer>...</answer> tags, e.g. <answer>8.39</answer>.
+    tags: [mutate, measure]
+    timeout_s: 480
+    preload:
+      viewer:
+        pdb_ids: ["8AYF"]
+    assertions:
+      - type: python_check
+        function: mv5499_distance_correct
+    rubric:
+      enabled: false
+
   - id: mv-6316
     difficulty: easy
     prompt: |

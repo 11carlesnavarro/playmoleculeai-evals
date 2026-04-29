@@ -43,12 +43,10 @@ class ChatSession:
         *,
         page: Page,
         model: str,
-        project: str,
         settings: Settings,
     ) -> None:
         self._page = page
         self._model = model
-        self._project = project
         self._settings = settings
         self._chat_id: str = ""
         self._closed = False

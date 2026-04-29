@@ -39,6 +39,24 @@ async def open_file_browser(page: Page, *, timeout_s: float = 60.0) -> None:
     logger.info("File Browser panel open")
 
 
+async def close_file_browser(page: Page, *, timeout_s: float = 10.0) -> None:
+    """Close the File Browser panel. No-op if it isn't currently open."""
+    chonky = page.locator(locators.CHONKY_ROOT).first
+    if not await chonky.is_visible():
+        return
+    try:
+        await page.locator(locators.FILE_BROWSER_ICON).first.click(
+            timeout=int(timeout_s * 1000)
+        )
+    except Exception as exc:
+        raise BrowserError(f"could not close File Browser panel: {exc}") from exc
+    try:
+        await chonky.wait_for(state="hidden", timeout=int(timeout_s * 1000))
+    except Exception as exc:
+        raise BrowserError(f"File Browser panel never closed: {exc}") from exc
+    logger.info("File Browser panel closed")
+
+
 async def dump_visible_text(page: Page) -> str:
     """Return the raw inner text of the Chonky grid for debugging.
 

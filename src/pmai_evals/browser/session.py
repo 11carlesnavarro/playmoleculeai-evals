@@ -73,6 +73,7 @@ class PMBrowser:
         self._context.set_default_navigation_timeout(
             self._settings.pmai_evals_browser_navigation_timeout_s * 1000
         )
+        await self._pin_project_cookie()
         return self
 
     async def __aexit__(
@@ -131,7 +132,7 @@ class PMBrowser:
 
         await self._wait_for_auth_cookies(timeout_s=2.0)
 
-    async def new_chat(self, *, model: str, project: str) -> ChatSession:
+    async def new_chat(self, *, model: str) -> ChatSession:
         """Open a fresh page and prepare a new chat for one rollout."""
         from pmai_evals.browser.chat import ChatSession
 
@@ -145,12 +146,30 @@ class PMBrowser:
             await page.close()
             raise BrowserError(f"navigation failed: {exc}") from exc
 
-        chat = ChatSession(page=page, model=model, project=project, settings=self._settings)
+        chat = ChatSession(page=page, model=model, settings=self._settings)
         await chat.prepare()
         if self._selected_model != model:
             await chat.select_model()
             self._selected_model = model
         return chat
+
+    async def _pin_project_cookie(self) -> None:
+        """Force every page in this context to load ``settings.pm_project``.
+
+        The frontend reads ``PM_PROJECT`` on mount (``fileBrowser.store.ts``)
+        and uses its value as the active project; without this the saved
+        ``storage_state`` decides, so runs silently write to whichever project
+        the last interactive session left open.
+        """
+        if self._context is None:
+            raise BrowserError("PMBrowser not entered")
+        project = self._settings.pm_project
+        await self._context.add_cookies([{
+            "name": "PM_PROJECT",
+            "value": project,
+            "url": self._settings.pm_frontend_url,
+        }])
+        logger.info("pinned PM_PROJECT=%s for this run", project)
 
     # ---- one-shot login (used by setup-auth) ----------------------------
 
