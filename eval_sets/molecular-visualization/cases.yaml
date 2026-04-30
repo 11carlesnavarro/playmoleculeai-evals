@@ -68,6 +68,21 @@ cases:
     rubric:
       enabled: false
 
+  - id: mv-2ity
+    difficulty: medium
+    prompt: |
+      Load EGFR kinase domain (2ITY). Color the N-lobe (residues 712-770)
+      blue (#0000FF) and the C-lobe (residues 771-979) yellow (#FFFF00) as
+      cartoon. Highlight the catalytic K745, E762, and D855 as ball-and-stick
+      in red (#FF0000).
+    tags: [domains, color, catalytic-triad]
+    timeout_s: 360
+    assertions:
+      - type: python_check
+        function: mv2ity_kinase_domains
+    rubric:
+      enabled: false
+
   - id: mv-6316
     difficulty: easy
     prompt: |
