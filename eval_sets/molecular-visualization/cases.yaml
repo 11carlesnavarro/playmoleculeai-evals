@@ -83,6 +83,19 @@ cases:
     rubric:
       enabled: false
 
+  - id: mv-7fab
+    difficulty: medium
+    prompt: |
+      Load the Fab structure 7FAB. Highlight the cysteine residues
+      involved in disulfide bonds using a viewer selection.
+    tags: [disulfide, antibody, selection]
+    timeout_s: 360
+    assertions:
+      - type: python_check
+        function: mv7fab_disulfides
+    rubric:
+      enabled: false
+
   - id: mv-6316
     difficulty: easy
     prompt: |

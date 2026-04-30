@@ -1,13 +1,4 @@
-2. `mv-8912`
-Prompt: `Please mark the CDR sequences in this Fab`
-Category: antibody annotation
-Fixture: `scenario`
-Eval mode: `hybrid`
-Prerequisites: load the Fab PDB from the trace.
-Why keep: adds antibody-specific annotation, which is both realistic and meaningfully different from pocket/contact tasks.
-Verification: marked residues should match the expected Fab CDR regions.
-
-3. `mv-7584`
+1. `mv-7584`
 Prompt: `Highlight the Fe atom of HEM, the C26 atom of UNK900, and the pseudo-oxo point, and add a local zoomed-in view`
 Category: atom-level reactive geometry
 Fixture: `scenario`
@@ -16,7 +7,7 @@ Prerequisites: load `heme-BA.pdb` and `pseudo_oxo.pdb`, with HEM Fe, UNK900 C26,
 Why keep: high-value atom-level visualization task with a local zoomed geometry check.
 Verification: the three geometric points should be highlighted correctly and the zoomed inset centered on them.
 
-4. `mv-0254`
+2. `mv-0254`
 Prompt: `load, 5TBY, 5N69, 8EFH, leave only the chains of the myosin ( all the chains representing the myosin) aling all the structures and compute the RMSD for all of them. color each structure with a diferent color`
 Category: multi-structure alignment
 Fixture: `standalone`
@@ -25,7 +16,7 @@ Prerequisites: none beyond access to the listed PDBs.
 Why keep: strong multi-structure alignment/RMSD case with explicit filtering and color separation.
 Verification: only myosin chains should remain, each structure should have a different color, and RMSD should be reported for the aligned set.
 
-5. `mv-6568`
+3. `mv-6568`
 Prompt: `Create a phosphatidylcholine/cholesterol membrane with a 1/0.1 ratio`
 Category: membrane assembly
 Fixture: `standalone`
