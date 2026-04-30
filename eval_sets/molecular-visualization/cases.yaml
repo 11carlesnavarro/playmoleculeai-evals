@@ -83,6 +83,24 @@ cases:
     rubric:
       enabled: false
 
+  - id: mv-1jpz
+    difficulty: medium
+    prompt: |
+      Mark the Fe atom of HEM (chain A), the C18 atom of ligand 140
+      (chain A), and the pseudo-oxo point (the atom in pseudo_oxo.pdb)
+      using a viewer selection.
+    tags: [atom-highlight, p450, selection]
+    timeout_s: 360
+    preload:
+      viewer:
+        pdb_ids: ["1JPZ"]
+        files: ["pseudo_oxo.pdb"]
+    assertions:
+      - type: python_check
+        function: mv1jpz_atoms_highlighted
+    rubric:
+      enabled: false
+
   - id: mv-7fab
     difficulty: medium
     prompt: |

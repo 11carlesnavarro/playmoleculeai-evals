@@ -9,6 +9,7 @@ changes.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -46,12 +47,20 @@ def _result(passed: bool, evidence: str) -> AssertionResult:
 
 
 def _find_system(state: Any, name: str) -> dict[str, Any] | None:
-    """Top-level system whose ``name`` matches case-insensitively."""
+    """Top-level system whose stem matches ``name`` case-insensitively.
+
+    Local-file loads carry the file extension in their viewer-state name
+    (``pseudo_oxo.pdb``); PDB-id loads do not. Stripping with ``Path.stem``
+    on both sides lets call sites pass either form.
+    """
     if not isinstance(state, list):
         return None
-    needle = name.lower()
+    needle = Path(name).stem.lower()
     for entry in state:
-        if isinstance(entry, dict) and str(entry.get("name", "")).lower() == needle:
+        if (
+            isinstance(entry, dict)
+            and Path(str(entry.get("name", ""))).stem.lower() == needle
+        ):
             return entry
     return None
 
@@ -81,28 +90,37 @@ def _chain_residues(
     return {r for c, r in hits if c.upper() == target}
 
 
-def _selected_residues(
+def _selected_atom_mask(
     viewer_state: Any, viewer_selection: Any, system_name: str, mol: Any
-) -> set[tuple[str, int]]:
-    """Residues covered by the user's viewer selection on ``system_name``.
+) -> np.ndarray | None:
+    """Atom mask of the user's viewer selection on ``system_name``, or ``None``.
 
     ``viewer_selection`` maps ``moleculeID`` to a moleculekit atomselect
     string (e.g. ``"index 1 2 5 to 10"``) populated by
-    ``mol.viewer_select(...)``. We look up the ``moleculeID`` for the named
-    system in ``viewer_state`` and resolve the selection against ``mol``.
+    ``mol.viewer_select(...)``. ``None`` covers any failure: missing
+    system, missing selection, or unparseable selection string.
     """
     system = _find_system(viewer_state, system_name)
     if system is None or not isinstance(viewer_selection, dict):
-        return set()
+        return None
     mol_id = system.get("moleculeID")
     if not mol_id:
-        return set()
+        return None
     sel = viewer_selection.get(mol_id)
     if not sel:
-        return set()
+        return None
     try:
-        mask = mol.atomselect(str(sel))
+        return mol.atomselect(str(sel))
     except RuntimeError:
+        return None
+
+
+def _selected_residues(
+    viewer_state: Any, viewer_selection: Any, system_name: str, mol: Any
+) -> set[tuple[str, int]]:
+    """(chain, resid) pairs covered by the user's viewer selection."""
+    mask = _selected_atom_mask(viewer_state, viewer_selection, system_name, mol)
+    if mask is None:
         return set()
     return set(zip(mol.chain[mask].tolist(), mol.resid[mask].tolist()))
 
@@ -141,6 +159,43 @@ def _residues_by_rep(
             continue
         out |= set(zip(mol.chain[mask].tolist(), mol.resid[mask].tolist()))
     return out
+
+
+# ---- mv-1jpz: 1JPZ Fe + substrate omega-C + pseudo-oxo atom highlight -----
+
+_MV1JPZ_PROT = "1JPZ"
+_MV1JPZ_OXO = "pseudo_oxo"
+_MV1JPZ_PROT_TRUTH = (
+    "(chain A and resname HEM and name FE) or "
+    "(chain A and resname 140 and name C18)"
+)
+
+
+def mv1jpz_atoms_highlighted(
+    artifact: RunArtifact, config: dict[str, Any]
+) -> AssertionResult:
+    try:
+        prot = artifact.load_system(_MV1JPZ_PROT)
+        oxo = artifact.load_system(_MV1JPZ_OXO)
+    except KeyError as exc:
+        return _result(False, str(exc))
+    state = artifact.viewer_state()
+    sel = artifact.viewer_selection()
+
+    prot_mask = _selected_atom_mask(state, sel, _MV1JPZ_PROT, prot)
+    oxo_mask = _selected_atom_mask(state, sel, _MV1JPZ_OXO, oxo)
+    prot_truth = prot.atomselect(_MV1JPZ_PROT_TRUTH)
+
+    prot_hit = int(prot_mask.sum()) if prot_mask is not None else 0
+    oxo_hit = int(oxo_mask.sum()) if oxo_mask is not None else 0
+    prot_passed = prot_mask is not None and bool(np.array_equal(prot_mask, prot_truth))
+    oxo_passed = oxo_hit == oxo.numAtoms
+
+    return _result(
+        prot_passed and oxo_passed,
+        f"1JPZ selection: {prot_hit} atoms (expected {int(prot_truth.sum())}); "
+        f"pseudo_oxo selection: {oxo_hit} atoms (expected {oxo.numAtoms})",
+    )
 
 
 # ---- mv-2ity: EGFR kinase 2ITY domain coloring + catalytic triad ----------
