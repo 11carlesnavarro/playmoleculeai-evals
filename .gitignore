@@ -8,6 +8,7 @@ playwright/.cache/
 
 # run artifacts
 runs/
+development/
 
 # python
 __pycache__/

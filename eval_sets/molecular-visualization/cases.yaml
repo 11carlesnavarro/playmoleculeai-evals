@@ -4,8 +4,8 @@ cases:
     difficulty: medium
     prompt: |
       Show chain A of VRK2 (2V62) aligned to chain A of VRK1 (3OP5),
-      and highlight in blue ball-and-stick the chain-A residues that
-      differ between them.
+      and highlight in blue (#0000FF) ball-and-stick the chain-A
+      residues that differ between them.
     tags: [align, compare, highlight]
     timeout_s: 480
     preload:
@@ -48,12 +48,23 @@ cases:
       <answer>...</answer> tags, e.g. <answer>8.39</answer>.
     tags: [mutate, measure]
     timeout_s: 480
-    preload:
-      viewer:
-        pdb_ids: ["8AYF"]
     assertions:
       - type: python_check
         function: mv5499_distance_correct
+    rubric:
+      enabled: false
+
+  - id: mv-8144
+    difficulty: medium
+    prompt: |
+      Load the METTL3-METTL14 complex (5IL1) and highlight using a
+      viewer selection the interface residues on both chains (residues
+      with any heavy atom within 5 Å of the partner chain).
+    tags: [interface, highlight]
+    timeout_s: 360
+    assertions:
+      - type: python_check
+        function: mv8144_interface_highlighted
     rubric:
       enabled: false
 
@@ -61,12 +72,9 @@ cases:
     difficulty: easy
     prompt: |
       Load 6FCX and highlight the active site (the protein residues
-      at 6 Å of the ligand SAH) in blue ball-and-stick.
+      at 6 Å of the ligand SAH) in blue (#0000FF) ball-and-stick.
     tags: [load, active-site, highlight]
     timeout_s: 360
-    preload:
-      viewer:
-        pdb_ids: ["6FCX"]
     assertions:
       - type: python_check
         function: mv6316_active_site_highlighted

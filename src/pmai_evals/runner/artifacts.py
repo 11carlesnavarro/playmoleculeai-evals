@@ -6,6 +6,7 @@ Layout (spec §4.4):
         trace.json
         final_answer.md
         viewer_state.json
+        viewer_selection.json
         screenshot.png
         dom_snapshot.html        (optional)
         metrics.json
@@ -60,6 +61,10 @@ class _CellPaths:
         return self.cell_dir / "viewer_state.json"
 
     @property
+    def viewer_selection_path(self) -> Path:
+        return self.cell_dir / "viewer_selection.json"
+
+    @property
     def screenshot_path(self) -> Path:
         return self.cell_dir / "screenshot.png"
 
@@ -107,6 +112,9 @@ class RunArtifactWriter(_CellPaths):
     def write_viewer_state(self, state: Any) -> None:
         write_json(self.viewer_state_path, state)
 
+    def write_viewer_selection(self, selection: Any) -> None:
+        write_json(self.viewer_selection_path, selection)
+
     def write_metrics(self, metrics: dict[str, Any]) -> None:
         write_json(self.metrics_path, metrics)
 
@@ -152,6 +160,11 @@ class RunArtifact(_CellPaths):
         return read_json_or(self.viewer_state_path, {})
 
     @cached_property
+    def _viewer_selection(self) -> Any:
+        """User selection as ``{moleculeID: "index ..."}``, or ``{}`` if none."""
+        return read_json_or(self.viewer_selection_path, {})
+
+    @cached_property
     def _metrics(self) -> dict[str, Any]:
         return read_json_or(self.metrics_path, {})
 
@@ -166,6 +179,9 @@ class RunArtifact(_CellPaths):
 
     def viewer_state(self) -> Any:
         return self._viewer_state
+
+    def viewer_selection(self) -> Any:
+        return self._viewer_selection
 
     def metrics(self) -> dict[str, Any]:
         return self._metrics

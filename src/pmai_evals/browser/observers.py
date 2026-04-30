@@ -41,5 +41,24 @@ async () => {
 }
 """
 
+# Returns the JSON-encoded user selection from the in-page Pyodide worker.
+# Shape is ``{moleculeID: "index N N to N ..."}`` (a moleculekit atomselect
+# string of source indices) populated by ``mol.viewer_select(...)``. Returns
+# ``null`` if Pyodide isn't ready or no selection has been made.
+VIEWER_SELECTION_JSON = """
+async () => {
+    if (!window.pyodideWorker) return null;
+    try {
+        const result = await window.pyodideWorker.RunPythonAsync({
+            context: {},
+            script: 'import json, _internal_py_utils\\njson.dumps(getattr(_internal_py_utils, "_VIEWER_SELECTION", None))'
+        });
+        return result;
+    } catch (err) {
+        return JSON.stringify({_error: String(err)});
+    }
+}
+"""
+
 # Pyodide-readiness probe.
 PYODIDE_READY = "() => Boolean(window.pyodideWorker && window.molstar)"

@@ -1,22 +1,4 @@
-1. `mv-3830`
-Prompt: `Display the 1IEP complex and compute the RMSD of the docked ligand relative to the experimental structure`
-Category: docking validation
-Fixture: `scenario`
-Eval mode: `quantitative`
-Prerequisites: load experimental `1IEP` and the uploaded docked pose from `output (1).pdbqt`.
-Why keep: strongest direct pose-validation task in the pool, with a numeric target and a visible overlay.
-Verification: computed ligand RMSD should match the docked-vs-experimental overlay within tolerance.
-
-2. `mv-8144`
-Prompt: `so take in consideration of mettk3-mettl14 complex pdb id 5il1 so first find interface residue of mettl3 and mettl14`
-Category: protein-protein interface analysis
-Fixture: `standalone`
-Eval mode: `quantitative`
-Prerequisites: none beyond access to `5IL1`.
-Why keep: realistic residue-level interface task with a crisp structural answer.
-Verification: reported METTL3 and METTL14 interface residues should match inter-chain contact geometry in `5IL1`.
-
-3. `mv-6860`
+2. `mv-6860`
 Prompt: `4.0 Å and List specific protein–ligand contacts (hydrogen bonds, hydrophobics) and export a 2D interaction map`
 Category: interaction analysis
 Fixture: `scenario`
@@ -25,7 +7,7 @@ Prerequisites: keep `0AlphaFold2CpunCSP11.pdb` and `betapinene.sdf` loaded in th
 Why keep: combines geometric filtering, contact typing, and an exportable 2D artifact in one strong eval.
 Verification: listed contacts should respect the `4.0 Å` rule and the exported 2D map should match the visible interaction network.
 
-4. `mv-8912`
+3. `mv-8912`
 Prompt: `Please mark the CDR sequences in this Fab`
 Category: antibody annotation
 Fixture: `scenario`
@@ -34,7 +16,7 @@ Prerequisites: load the Fab PDB from the trace.
 Why keep: adds antibody-specific annotation, which is both realistic and meaningfully different from pocket/contact tasks.
 Verification: marked residues should match the expected Fab CDR regions.
 
-5. `mv-7584`
+4. `mv-7584`
 Prompt: `Highlight the Fe atom of HEM, the C26 atom of UNK900, and the pseudo-oxo point, and add a local zoomed-in view`
 Category: atom-level reactive geometry
 Fixture: `scenario`
@@ -43,7 +25,7 @@ Prerequisites: load `heme-BA.pdb` and `pseudo_oxo.pdb`, with HEM Fe, UNK900 C26,
 Why keep: high-value atom-level visualization task with a local zoomed geometry check.
 Verification: the three geometric points should be highlighted correctly and the zoomed inset centered on them.
 
-6. `mv-0254`
+5. `mv-0254`
 Prompt: `load, 5TBY, 5N69, 8EFH, leave only the chains of the myosin ( all the chains representing the myosin) aling all the structures and compute the RMSD for all of them. color each structure with a diferent color`
 Category: multi-structure alignment
 Fixture: `standalone`
@@ -52,7 +34,7 @@ Prerequisites: none beyond access to the listed PDBs.
 Why keep: strong multi-structure alignment/RMSD case with explicit filtering and color separation.
 Verification: only myosin chains should remain, each structure should have a different color, and RMSD should be reported for the aligned set.
 
-7. `mv-6568`
+6. `mv-6568`
 Prompt: `Create a phosphatidylcholine/cholesterol membrane with a 1/0.1 ratio`
 Category: membrane assembly
 Fixture: `standalone`

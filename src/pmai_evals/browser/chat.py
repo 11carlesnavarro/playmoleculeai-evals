@@ -18,6 +18,7 @@ from pmai_evals.browser import locators
 from pmai_evals.browser.observers import (
     PYODIDE_READY,
     SCREENSHOT_DATA_URI,
+    VIEWER_SELECTION_JSON,
     VIEWER_STATE_JSON,
 )
 from pmai_evals.config import Settings
@@ -245,10 +246,22 @@ class ChatSession:
 
     async def get_viewer_state(self) -> dict[str, Any]:
         """Return the in-page systems_tree as a Python dict."""
+        return await self._eval_pyodide_json(VIEWER_STATE_JSON, "viewer state")
+
+    async def get_viewer_selection(self) -> dict[str, Any]:
+        """Return the user selection as ``{moleculeID: "index ..."}``.
+
+        Empty dict if no selection has been made via ``mol.viewer_select``.
+        The selection string is a moleculekit atomselect expression of
+        source indices and can be passed straight to ``mol.atomselect``.
+        """
+        return await self._eval_pyodide_json(VIEWER_SELECTION_JSON, "viewer selection")
+
+    async def _eval_pyodide_json(self, observer: str, label: str) -> dict[str, Any]:
         try:
-            raw = await self._page.evaluate(VIEWER_STATE_JSON)
+            raw = await self._page.evaluate(observer)
         except Exception as exc:
-            raise BrowserError(f"viewer state eval failed: {exc}") from exc
+            raise BrowserError(f"{label} eval failed: {exc}") from exc
         if raw is None:
             return {}
         if isinstance(raw, str):

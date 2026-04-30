@@ -269,6 +269,12 @@ async def _run_one(
                 viewer_state = {"_error": str(exc)}
 
             try:
+                viewer_selection = await chat.get_viewer_selection()
+            except BrowserError as exc:
+                logger.warning("viewer selection fetch failed: %s", exc)
+                viewer_selection = {"_error": str(exc)}
+
+            try:
                 await chat.save_screenshot(writer.screenshot_path)
             except BrowserError as exc:
                 logger.warning("screenshot failed: %s", exc)
@@ -293,6 +299,7 @@ async def _run_one(
         trace = parse_trace(history, chat_id, model=entry.model)
         writer.write_trace(trace)
         writer.write_viewer_state(viewer_state)
+        writer.write_viewer_selection(viewer_selection)
         writer.write_final_answer(final_answer or trace.final_answer)
 
         cost = cost_for_usage(
