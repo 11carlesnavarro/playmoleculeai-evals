@@ -8,7 +8,9 @@ changes.
 
 from __future__ import annotations
 
+import itertools
 import re
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -115,14 +117,25 @@ def _selected_atom_mask(
         return None
 
 
+def _residues_from_mask(mol: Any, mask: np.ndarray) -> set[tuple[str, int]]:
+    return set(zip(mol.chain[mask].tolist(), mol.resid[mask].tolist()))
+
+
 def _selected_residues(
     viewer_state: Any, viewer_selection: Any, system_name: str, mol: Any
 ) -> set[tuple[str, int]]:
     """(chain, resid) pairs covered by the user's viewer selection."""
     mask = _selected_atom_mask(viewer_state, viewer_selection, system_name, mol)
-    if mask is None:
-        return set()
-    return set(zip(mol.chain[mask].tolist(), mol.resid[mask].tolist()))
+    return _residues_from_mask(mol, mask) if mask is not None else set()
+
+
+def _iter_visible_reps(state: Any, system_name: str) -> Iterator[dict[str, Any]]:
+    system = _find_system(state, system_name)
+    if system is None:
+        return
+    for rep in system.get("representations") or []:
+        if rep.get("visibility", True) and rep.get("selection"):
+            yield rep
 
 
 def _residues_by_rep(
@@ -133,32 +146,95 @@ def _residues_by_rep(
     types: tuple[str, ...],
     color: int,
 ) -> set[tuple[str, int]]:
-    """Residues covered by visible reps matching any of ``types`` and ``color``.
-
-    Each rep's selection is evaluated against the loaded ``mol`` so any valid
-    selection grammar (``resid 1 2 3``, ranges, ``within X of ...``,
-    ``same residue as ...``) resolves to the correct residue set.
-    """
-    system = _find_system(state, system_name)
-    if system is None:
-        return set()
+    """Residues covered by visible reps matching any of ``types`` and ``color``."""
     out: set[tuple[str, int]] = set()
-    for rep in system.get("representations") or []:
-        if not rep.get("visibility", True):
-            continue
+    for rep in _iter_visible_reps(state, system_name):
         if not any(s in str(rep.get("type", "")).lower() for s in types):
             continue
         if _normalize_color(rep.get("color_value")) != color:
             continue
-        sel = rep.get("selection")
-        if not sel:
-            continue
         try:
-            mask = mol.atomselect(str(sel))
+            mask = mol.atomselect(str(rep["selection"]))
         except RuntimeError:
             continue
-        out |= set(zip(mol.chain[mask].tolist(), mol.resid[mask].tolist()))
+        out |= _residues_from_mask(mol, mask)
     return out
+
+
+def _visible_chains(state: Any, system_name: str, mol: Any) -> set[str]:
+    chains: set[str] = set()
+    for rep in _iter_visible_reps(state, system_name):
+        try:
+            mask = mol.atomselect(str(rep["selection"]))
+        except RuntimeError:
+            continue
+        chains |= set(mol.chain[mask].tolist())
+    return chains
+
+
+def _visible_solid_color(state: Any, system_name: str) -> int | None:
+    """Single solid color shared by all visible reps, or ``None`` if reps disagree
+    or any rep uses a palette (``color_value`` unset)."""
+    seen: set[int] = set()
+    for rep in _iter_visible_reps(state, system_name):
+        c = _normalize_color(rep.get("color_value"))
+        if c is None:
+            return None
+        seen.add(c)
+    return seen.pop() if len(seen) == 1 else None
+
+
+# ---- mv-0254: 5TBY/5N69/8EFH single-motor myosin filter, align, color -----
+
+# Chains that may remain visible per PDB after dropping non-myosin partners
+# and the redundant heavy chain of any homo-dimer (chain A required).
+_MV0254_ALLOWED_CHAINS: dict[str, set[str]] = {
+    "5TBY": {"A", "C", "D", "E", "F"},
+    "5N69": {"A", "G", "H"},
+    "8EFH": {"A", "O", "P"},
+}
+_MV0254_RMSD_TOL_A = 8.0
+
+
+def mv0254_myosin_aligned(
+    artifact: RunArtifact, config: dict[str, Any]
+) -> AssertionResult:
+    pdbs = tuple(_MV0254_ALLOWED_CHAINS)
+    try:
+        mols = {pdb: artifact.load_system(pdb) for pdb in pdbs}
+    except KeyError as exc:
+        return _result(False, str(exc))
+    state = artifact.viewer_state()
+
+    visibility = [
+        (
+            "A" in visible and visible.issubset(_MV0254_ALLOWED_CHAINS[pdb]),
+            f"{pdb}: visible={sorted(visible)}, allowed={sorted(_MV0254_ALLOWED_CHAINS[pdb])}",
+        )
+        for pdb, visible in (
+            (pdb, _visible_chains(state, pdb, mols[pdb])) for pdb in pdbs
+        )
+    ]
+
+    colors = {pdb: _visible_solid_color(state, pdb) for pdb in pdbs}
+    color_passed = None not in colors.values() and len(set(colors.values())) == len(colors)
+    color_evidence = "colors: " + ", ".join(
+        f"{pdb}={c if c is None else f'#{c:06X}'}" for pdb, c in colors.items()
+    )
+
+    distances = {
+        (a, b): _chain_a_paired_rmsd(mols[a], mols[b])[0]
+        for a, b in itertools.combinations(pdbs, 2)
+    }
+    align_passed = all(d < _MV0254_RMSD_TOL_A for d in distances.values())
+    align_evidence = "chain-A paired RMSD: " + ", ".join(
+        f"{a}-{b}={d:.2f}Å" for (a, b), d in distances.items()
+    )
+
+    return _result(
+        all(p for p, _ in visibility) and color_passed and align_passed,
+        "; ".join([*(ev for _, ev in visibility), color_evidence, align_evidence]),
+    )
 
 
 # ---- mv-1jpz: 1JPZ Fe + substrate omega-C + pseudo-oxo atom highlight -----
@@ -634,3 +710,48 @@ def mv6316_active_site_highlighted(
         for label, expected in _MV6316_VALID
     )
     return _result(False, f"hit={len(hits)}; {diffs}")
+
+
+# ---- mv-6568: POPC/cholesterol membrane composition + ratio ----------------
+
+# Generated by development/test_case_10.py.
+
+_MV6568_SYSTEM = "membrane"
+_MV6568_PC_RESNAME = "POPC"
+_MV6568_CHL_RESNAME = "CHL1"
+_MV6568_RATIO_TRUTH = 622 / 62
+_MV6568_RATIO_TOL_PCT = 0.05
+
+
+def mv6568_membrane_composition(
+    artifact: RunArtifact, config: dict[str, Any]
+) -> AssertionResult:
+    try:
+        mol = artifact.load_system(_MV6568_SYSTEM)
+    except KeyError as exc:
+        return _result(False, str(exc))
+    state = artifact.viewer_state()
+
+    pc_truth = _residues_from_mask(mol, mol.atomselect(f"resname {_MV6568_PC_RESNAME}"))
+    chl_truth = _residues_from_mask(mol, mol.atomselect(f"resname {_MV6568_CHL_RESNAME}"))
+    pc_hit = _residues_by_rep(state, _MV6568_SYSTEM, mol, types=_STICK_TYPES, color=_BLUE)
+    chl_hit = _residues_by_rep(state, _MV6568_SYSTEM, mol, types=_STICK_TYPES, color=_YELLOW)
+
+    answer = _parse_numeric_answer(artifact)
+    if answer is None or answer <= 0:
+        ratio_passed = False
+        ratio_evidence = f"answer={answer!r} (expected ≈{_MV6568_RATIO_TRUTH:.2f})"
+    else:
+        rel_err = abs(answer - _MV6568_RATIO_TRUTH) / _MV6568_RATIO_TRUTH
+        ratio_passed = rel_err <= _MV6568_RATIO_TOL_PCT
+        ratio_evidence = (
+            f"answer={answer:.3f} (expected {_MV6568_RATIO_TRUTH:.3f}, "
+            f"rel err {rel_err * 100:.1f}%)"
+        )
+
+    return _result(
+        pc_hit == pc_truth and chl_hit == chl_truth and ratio_passed,
+        f"PC blue: hit={len(pc_hit)}/{len(pc_truth)}; "
+        f"CHL yellow: hit={len(chl_hit)}/{len(chl_truth)}; "
+        f"ratio: {ratio_evidence}",
+    )

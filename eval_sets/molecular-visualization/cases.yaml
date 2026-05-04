@@ -1,5 +1,23 @@
 cases:
 
+  - id: mv-0254
+    difficulty: hard
+    prompt: |
+      Load 5TBY, 5N69, and 8EFH. Drop every chain that is not part of
+      the myosin (e.g. actin or other non-myosin partners). For any
+      structure that contains a myosin homo-dimer, also keep only one
+      of the two heavy chains plus its associated light chains, so each
+      PDB ends up showing a single myosin motor. Then structurally
+      align the three motors and color each structure with a distinct
+      solid color so the three are visually distinguishable.
+    tags: [multi-structure, align, filter, color]
+    timeout_s: 600
+    assertions:
+      - type: python_check
+        function: mv0254_myosin_aligned
+    rubric:
+      enabled: false
+
   - id: mv-5483
     difficulty: medium
     prompt: |
@@ -80,6 +98,26 @@ cases:
     assertions:
       - type: python_check
         function: mv2ity_kinase_domains
+    rubric:
+      enabled: false
+
+  - id: mv-6568
+    difficulty: medium
+    prompt: |
+      Load membrane.pdb. Color the phosphatidylcholine lipids blue
+      (#0000FF) and the cholesterol molecules yellow (#FFFF00) as
+      ball-and-stick. Then count the residues of each kind in the
+      loaded membrane and report the molar ratio of phosphatidylcholine
+      to cholesterol between <answer>...</answer> tags as a decimal,
+      e.g. <answer>2.50</answer>.
+    tags: [membrane, lipids, color, count, ratio]
+    timeout_s: 480
+    preload:
+      project:
+        files: ["membrane.pdb"]
+    assertions:
+      - type: python_check
+        function: mv6568_membrane_composition
     rubric:
       enabled: false
 
