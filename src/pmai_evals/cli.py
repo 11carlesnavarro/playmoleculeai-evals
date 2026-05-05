@@ -83,29 +83,31 @@ def setup_auth() -> None:
 
 # --- run ------------------------------------------------------------------
 
-def _resolve_models(
-    explicit: list[str] | None,
-    tier: str | None,
-) -> list[str]:
+def _resolve_models(explicit: str) -> list[str]:
     registry = load_registry()
-    if explicit:
-        return explicit
-    if tier:
-        return [m.id for m in registry.by_tier(tier)]  # type: ignore[arg-type]
-    return [m.id for m in registry.by_tier("flagship")]
+    known = {m.id for m in registry.models}
+    chosen = [m.strip() for m in explicit.split(",") if m.strip()]
+    if not chosen:
+        raise typer.BadParameter("--models must list at least one model id")
+    unknown = [m for m in chosen if m not in known]
+    if unknown:
+        raise typer.BadParameter(
+            f"unknown model id(s): {unknown}; known: {sorted(known)}"
+        )
+    return chosen
 
 
 @app.command()
 def run(
     eval_set: Annotated[str, typer.Option("--eval-set", "-e", help="Eval set id")],
     models: Annotated[
-        str | None,
-        typer.Option("--models", help="Comma-separated model ids"),
-    ] = None,
-    tier: Annotated[
-        str | None,
-        typer.Option("--tier", help="flagship | cheap | all"),
-    ] = None,
+        str,
+        typer.Option(
+            "--models",
+            "-m",
+            help="Comma-separated model ids from the registry (`pmai-evals list-models`)",
+        ),
+    ],
     seeds: Annotated[int, typer.Option("--seeds", help="Seeds per case", min=1)] = 1,
     max_cost: Annotated[
         float | None,
@@ -117,6 +119,13 @@ def run(
         typer.Option("--case", help="Run only this case (repeatable)"),
     ] = None,
     label: Annotated[str, typer.Option("--label", help="Run id suffix")] = "iter",
+    run_id: Annotated[
+        str | None,
+        typer.Option(
+            "--run-id",
+            help="Reuse an existing run dir; new case results merge into its summary by (case_id, model, seed). Ignores --label.",
+        ),
+    ] = None,
     judge_model: Annotated[
         str | None, typer.Option("--judge-model", help="Override judge model")
     ] = None,
@@ -146,18 +155,12 @@ def run(
         console.print(f"[red]eval set error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
-    chosen_models = _resolve_models(
-        [m.strip() for m in models.split(",")] if models else None,
-        tier,
-    )
-
     config = RunConfig(
         eval_set_id=eval_set,
-        models=chosen_models,
+        models=_resolve_models(models),
         seeds=seeds,
         max_cost_usd=max_cost if max_cost is not None else settings.pmai_evals_max_cost_usd,
         headless=headless,
-        tier=tier if tier in {"flagship", "cheap", "all"} else None,  # type: ignore[arg-type]
         case_filter=list(case) if case else None,
         run_label=label,
         judge_model=judge_model or settings.pmai_evals_judge_model,
@@ -175,7 +178,7 @@ def run(
         return
 
     try:
-        summary = asyncio.run(run_matrix(es, config, settings))
+        summary = asyncio.run(run_matrix(es, config, settings, run_id=run_id))
     except BudgetExceededError as exc:
         console.print(f"[yellow]budget abort:[/yellow] {exc}")
         raise typer.Exit(code=2) from exc

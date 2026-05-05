@@ -10,6 +10,10 @@ playwright/.cache/
 runs/
 development/
 
+# BixBench capsule data: large, reproducible via scripts/fetch_bixbench.py
+eval_sets/bixbench/fixtures/*/
+eval_sets/bixbench-verified/fixtures/*/
+
 # python
 __pycache__/
 *.py[cod]

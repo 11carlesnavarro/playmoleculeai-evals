@@ -34,7 +34,6 @@ class ModelEntry(BaseModel):
 
     id: str
     provider: Literal["openai", "anthropic", "google"]
-    tier: Literal["flagship", "cheap"]
     input_per_mtok_usd: float = 0.0
     output_per_mtok_usd: float = 0.0
     cached_input_per_mtok_usd: float = 0.0
@@ -53,11 +52,6 @@ class ModelRegistry(BaseModel):
             if entry.id == model_id:
                 return entry
         raise KeyError(f"Unknown model id: {model_id}")
-
-    def by_tier(self, tier: Literal["flagship", "cheap", "all"]) -> list[ModelEntry]:
-        if tier == "all":
-            return list(self.models)
-        return [m for m in self.models if m.tier == tier]
 
 
 # --- eval set / cases ------------------------------------------------------
@@ -149,7 +143,7 @@ class EvalSetSpec(BaseModel):
     description: str = ""
     difficulty: str = "mixed"
     requires_browser: bool = True
-    default_timeout_s: int = 300
+    default_timeout_s: int | None = 300
     default_expected_cost_usd: float = 0.05
     rubric_path: str | None = None
     tags: list[str] = Field(default_factory=list)
@@ -181,7 +175,6 @@ class RunConfig(BaseModel):
     seeds: int = 1
     max_cost_usd: float
     headless: bool
-    tier: Literal["flagship", "cheap", "all"] | None = None
     case_filter: list[str] | None = None
     run_label: str
     judge_model: str

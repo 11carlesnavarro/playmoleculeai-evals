@@ -161,12 +161,15 @@ class ChatSession:
                 f"rollout used model {sent!r}, expected {self._model!r}"
             )
 
-    async def wait_for_completion(self, *, timeout_s: int) -> CompletionStatus:
+    async def wait_for_completion(
+        self, *, timeout_s: int | None
+    ) -> CompletionStatus:
         """Block until the run finishes or times out.
 
         Primary signal: the ``Regenerate`` button becomes enabled. The
         playmolecule frontend re-enables it once the model has finished
-        streaming and any pmview tool calls have settled.
+        streaming and any pmview tool calls have settled. ``timeout_s=None``
+        waits indefinitely (Playwright's ``timeout=0`` convention).
         """
 
         from playwright.async_api import TimeoutError as PWTimeout
@@ -174,17 +177,21 @@ class ChatSession:
         regenerate = self._page.get_by_role(
             locators.REGENERATE_BUTTON[0], name=locators.REGENERATE_BUTTON[1]
         )
+        wait_ms = 0 if timeout_s is None else timeout_s * 1000
         try:
-            await regenerate.wait_for(timeout=timeout_s * 1000)
-            # Wait until it's actually enabled, not just present.
-            for _ in range(timeout_s * 2):
-                if await regenerate.is_enabled():
-                    break
-                await asyncio.sleep(0.5)
+            await regenerate.wait_for(timeout=wait_ms)
+            if timeout_s is None:
+                while not await regenerate.is_enabled():
+                    await asyncio.sleep(0.5)
             else:
-                raise ChatTimeoutError(
-                    f"Regenerate button never enabled within {timeout_s}s"
-                )
+                for _ in range(timeout_s * 2):
+                    if await regenerate.is_enabled():
+                        break
+                    await asyncio.sleep(0.5)
+                else:
+                    raise ChatTimeoutError(
+                        f"Regenerate button never enabled within {timeout_s}s"
+                    )
         except PWTimeout as exc:
             raise ChatTimeoutError(
                 f"Regenerate button never appeared within {timeout_s}s"
@@ -223,26 +230,15 @@ class ChatSession:
         return data
 
     async def _chat_api_request(self, method: str) -> Any:
-        """Call ``/v3/agent/chat/{chat_uid}`` with the required CSRF header.
-
-        The backend uses a double-submit cookie CSRF scheme: the client
-        must echo the ``csrf_token`` cookie value in an ``X-CSRF-Token``
-        header. ``page.request`` sends cookies but not derived headers,
-        so we add it explicitly.
-        """
+        """Call ``/v3/agent/chat/{chat_uid}`` with CSRF + auth-refresh handling."""
+        from pmai_evals.browser.project_files import authed_fetch
         url = f"{self._settings.pm_frontend_url}/v3/agent/chat/{self._chat_id}?full=true"
-        headers = {"X-CSRF-Token": await self._read_csrf_token()}
         try:
-            return await self._page.request.fetch(url, method=method, headers=headers)
+            return await authed_fetch(
+                self._page, self._settings.pm_frontend_url, url, method=method,
+            )
         except Exception as exc:
             raise BrowserError(f"{method} {url} failed: {exc}") from exc
-
-    async def _read_csrf_token(self) -> str:
-        cookies = await self._page.context.cookies(self._settings.pm_frontend_url)
-        for cookie in cookies:
-            if cookie.get("name") == "csrf_token":
-                return cookie.get("value") or ""
-        return ""
 
     async def get_viewer_state(self) -> dict[str, Any]:
         """Return the in-page systems_tree as a Python dict."""

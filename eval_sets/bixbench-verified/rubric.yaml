@@ -1,0 +1,12 @@
+# Placeholder. bixbench-verified cases use python_check verifiers
+# (bix_str_verifier / bix_range_verifier / bix_llm_verifier from
+# eval_sets/bixbench-verified/checks.py). No case currently enables
+# the rubric; this file exists only because eval_set.yaml requires
+# rubric_path.
+dimensions:
+  - name: correctness
+    question: |
+      Does the answer correctly resolve the research question against
+      the capsule's data?
+    scale: [1, 5]
+pass_threshold: 3.5

@@ -14,8 +14,7 @@ from pathlib import Path
 
 from pmai_evals._io import write_json
 from pmai_evals.browser.project_files import (
-    close_file_browser,
-    open_file_browser,
+    clear_project,
     upload_to_project,
 )
 from pmai_evals.browser.viewer_loader import (
@@ -119,8 +118,11 @@ async def run_matrix(
     started_at = datetime.now(UTC)
     rid = run_id or make_run_id(config.eval_set_id, config.run_label, now=started_at)
     run_dir = settings.results_dir / rid
+    reuse_existing = run_id is not None and run_dir.is_dir()
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    if reuse_existing:
+        logger.info("reusing existing run dir %s", run_dir)
     record = RunRecord(
         run_id=rid,
         eval_set=eval_set.spec.id,
@@ -143,7 +145,6 @@ async def run_matrix(
     case_summaries: list[CaseSummary] = []
     aborted = False
 
-    # Group by model so we can amortize one PMBrowser per model.
     by_model: dict[str, list[MatrixEntry]] = {}
     for entry in matrix:
         by_model.setdefault(entry.model, []).append(entry)
@@ -173,6 +174,7 @@ async def run_matrix(
                         eval_set=eval_set,
                         run_dir=run_dir,
                         budget=budget,
+                        settings=settings,
                     )
                     case_summaries.append(summary)
                 if aborted:
@@ -196,17 +198,38 @@ async def run_matrix(
     record = record.model_copy(update={"finished_at": finished_at})
     _write_run_json(run_dir, record)
 
+    merged_cases = (
+        _merge_case_summaries(run_dir / "summary.json", case_summaries)
+        if reuse_existing
+        else case_summaries
+    )
     summary = RunSummary(
         run_id=rid,
         eval_set=eval_set.spec.id,
         started_at=started_at,
         finished_at=finished_at,
-        cases=case_summaries,
-        total_cost_usd=budget.total_cost_usd,
+        cases=merged_cases,
+        total_cost_usd=sum(c.cost_usd for c in merged_cases),
         aborted_over_budget=aborted,
     )
     _write_summary(run_dir, summary)
     return summary
+
+
+def _merge_case_summaries(
+    summary_path: Path, fresh: list[CaseSummary]
+) -> list[CaseSummary]:
+    """Replace existing per-(case, model, seed) entries with fresh ones."""
+    if not summary_path.is_file():
+        return fresh
+    try:
+        existing = RunSummary.model_validate_json(summary_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("could not parse existing summary.json (%s); writing fresh", exc)
+        return fresh
+    fresh_keys = {(c.case_id, c.model, c.seed) for c in fresh}
+    kept = [c for c in existing.cases if (c.case_id, c.model, c.seed) not in fresh_keys]
+    return kept + list(fresh)
 
 
 # --- per-case ---------------------------------------------------------------
@@ -215,13 +238,17 @@ async def _preload_scenario(
     page: object,  # playwright Page, untyped to keep the import out of module load
     preload: PreloadSpec,
     eval_set: EvalSet,
+    *,
+    project: str,
+    frontend_url: str,
 ) -> None:
     """Materialize scenario state before the prompt is sent."""
     if preload.project.files:
-        await open_file_browser(page)  # type: ignore[arg-type]
-        for name in preload.project.files:
-            await upload_to_project(page, eval_set.fixture_path(name))  # type: ignore[arg-type]
-        await close_file_browser(page)  # type: ignore[arg-type]
+        local_paths = [eval_set.fixture_path(name) for name in preload.project.files]
+        await upload_to_project(
+            page, local_paths,  # type: ignore[arg-type]
+            project=project, frontend_url=frontend_url,
+        )
 
     for pdb_id in preload.viewer.pdb_ids:
         await load_pdb_id(page, pdb_id)  # type: ignore[arg-type]
@@ -236,6 +263,7 @@ async def _run_one(
     eval_set: EvalSet,
     run_dir: Path,
     budget: Budget,
+    settings: Settings,
 ) -> CaseSummary:
     case = entry.case
     writer = RunArtifactWriter(
@@ -250,8 +278,17 @@ async def _run_one(
             model=entry.model
         )
         try:
+            await clear_project(
+                chat.page,
+                project=settings.pm_project,
+                frontend_url=settings.pm_frontend_url,
+            )
             if not case.preload.is_empty():
-                await _preload_scenario(chat.page, case.preload, eval_set)
+                await _preload_scenario(
+                    chat.page, case.preload, eval_set,
+                    project=settings.pm_project,
+                    frontend_url=settings.pm_frontend_url,
+                )
             await chat.send_prompt(case.prompt)
             status_str = await chat.wait_for_completion(timeout_s=timeout_s)
             chat_id = chat.chat_id
@@ -298,6 +335,11 @@ async def _run_one(
 
         trace = parse_trace(history, chat_id, model=entry.model)
         writer.write_trace(trace)
+        if not trace.messages and not trace.tool_calls:
+            raise BrowserError(
+                f"agent rollout produced no events (chat_id={chat_id}); "
+                "treat as failed so re-run via --run-id retries the case"
+            )
         writer.write_viewer_state(viewer_state)
         writer.write_viewer_selection(viewer_selection)
         writer.write_final_answer(final_answer or trace.final_answer)

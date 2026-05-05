@@ -155,10 +155,9 @@ imported once per eval set load. Each function must return an
 ### 3.7 Run configuration (CLI)
 
 ```
-pmai-evals run --eval-set <id> [options]
+pmai-evals run --eval-set <id> --models <id,id,...> [options]
 
-  --models <id,id,...>        Comma-separated model ids (overrides --tier)
-  --tier flagship|cheap|all   Defaults to flagship
+  --models, -m <id,id,...>    Comma-separated model ids (required)
   --seeds <N>                 Default 1
   --max-cost <USD>            Default $PMAI_EVALS_MAX_COST_USD
   --headless / --no-headless  Default headless
@@ -168,8 +167,8 @@ pmai-evals run --eval-set <id> [options]
   --dry-run                   Print the planned matrix and exit
 ```
 
-`--models` and `--tier` are mutually informative: `--models` overrides
-`--tier`. `--case` filters the matrix; an unknown case id is a user error.
+`--models` is required and must list ids from `pmai-evals list-models`.
+`--case` filters the matrix; an unknown case id is a user error.
 
 ### 3.8 Environment
 
@@ -282,7 +281,6 @@ serialization layer that produces these shapes.
     "seeds": "<int>",
     "max_cost_usd": "<float>",
     "headless": "<bool>",
-    "tier": "flagship|cheap|all|null",
     "case_filter": ["<case_id>", "..."],
     "run_label": "<string>",
     "judge_model": "<model_id>"

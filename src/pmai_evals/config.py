@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     pm_email: str | None = None
     pm_password: str | None = None
     pm_user_bucket: str = "/shared2/pmai/pmbackend/public-projects"
-    pm_project: str = "pmai-evals"
+    pm_project: str = "research-workspace"
 
     # --- judge & provider keys ---
     pmai_evals_judge_model: str = "claude-sonnet-4-6"
@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
 
     # --- run defaults ---
-    pmai_evals_max_cost_usd: float = 10.0
+    pmai_evals_max_cost_usd: float = 200.0
     pmai_evals_results_dir: Path = Path("./runs")
     pmai_evals_headless: bool = True
     pmai_evals_log_level: str = "INFO"

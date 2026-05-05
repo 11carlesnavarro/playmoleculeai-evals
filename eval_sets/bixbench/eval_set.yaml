@@ -1,0 +1,15 @@
+id: bixbench
+skill_under_test: bioinformatics
+description: |
+  BixBench (FutureHouse + ScienceMachine, 2025): a comprehensive benchmark
+  of 205 open-ended bioinformatics analysis questions over 60 published
+  research capsules. Each case ships a folder of raw and processed data
+  files (CSV, TSV, RDS, count matrices, etc.) into the project workspace,
+  then asks the agent to answer a research question that requires reading
+  the data and running computations on it.
+difficulty: hard
+requires_browser: true
+default_timeout_s: null    # bioinformatics analyses run as long as they need
+default_expected_cost_usd: 0.50
+rubric_path: rubric.md
+tags: [bixbench, bioinformatics, data-analysis]

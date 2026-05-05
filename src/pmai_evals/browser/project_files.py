@@ -1,7 +1,10 @@
 """Drive the pmview File Browser panel to move project files in and out.
 
-Everything goes through the same browser path a human eval reviewer
-would use; there are no direct backend calls, no filesystem peeking.
+Uploads go through the frontend's hidden ``<input type=file>`` (same path
+the chonky toolbar drives), which keeps the auth refresh-token flow under
+the page. The chonky grid is virtualized so we cannot confirm completion
+by reading visible names; instead we poll the backend listing endpoint
+the same code uses for ``clear_project``.
 """
 
 from __future__ import annotations
@@ -10,7 +13,7 @@ import asyncio
 import logging
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pmai_evals.browser import locators
 from pmai_evals.errors import BrowserError
@@ -70,48 +73,170 @@ async def dump_visible_text(page: Page) -> str:
         raise BrowserError(f"could not read File Browser contents: {exc}") from exc
 
 
-async def _wait_for_visible_name(
-    page: Page, name: str, *, timeout_s: float
-) -> None:
-    deadline = time.monotonic() + timeout_s
-    last = ""
-    while time.monotonic() < deadline:
-        last = await dump_visible_text(page)
-        if name in last:
-            return
-        await asyncio.sleep(0.5)
-    raise BrowserError(
-        f"{name!r} never appeared in File Browser within {timeout_s:.0f}s; "
-        f"last grid text={last[:300]!r}"
+_CSRF_HEADER = "X-CSRF-Token"
+_CSRF_COOKIE = "csrf_token"
+
+
+async def _read_csrf_token(page: Page, frontend_url: str) -> str:
+    for cookie in await page.context.cookies(frontend_url):
+        if cookie.get("name") == _CSRF_COOKIE:
+            return cookie.get("value") or ""
+    return ""
+
+
+async def _safe_body(resp: object, limit: int = 200) -> str:
+    try:
+        return (await resp.text())[:limit]  # type: ignore[attr-defined]
+    except Exception:
+        return ""
+
+
+async def authed_fetch(
+    page: Page,
+    frontend_url: str,
+    url: str,
+    *,
+    method: str = "GET",
+    **kwargs: Any,
+) -> Any:
+    """Fetch with auto-refresh on 401, mirroring pmview's ``callAuthenticatedApiEndpoint``.
+
+    Long-running cases outlive the access-token TTL; without a refresh
+    handler, the next API call (typically ``clear_project``'s listing)
+    fails the whole case with a 401. We replicate the frontend's flow:
+    on 401, ``POST /v3/auth/refresh-token`` (cookies carry the refresh
+    token) and replay the original request once with the rotated CSRF.
+    """
+    headers = dict(kwargs.pop("headers", None) or {})
+    headers[_CSRF_HEADER] = await _read_csrf_token(page, frontend_url)
+    resp = await page.request.fetch(url, method=method, headers=headers, **kwargs)
+    if resp.status != 401:
+        return resp
+    refresh_resp = await page.request.fetch(
+        f"{frontend_url}/v3/auth/refresh-token",
+        method="POST",
+        headers={_CSRF_HEADER: headers[_CSRF_HEADER]},
     )
+    if not refresh_resp.ok:
+        return resp
+    headers[_CSRF_HEADER] = await _read_csrf_token(page, frontend_url)
+    return await page.request.fetch(url, method=method, headers=headers, **kwargs)
+
+
+async def _list_project_entries(
+    page: Page, project: str, frontend_url: str
+) -> list[dict[str, Any]]:
+    """Fetch immediate children of ``<project>/`` from the backend.
+
+    Returns ``[]`` if the project doesn't exist yet (404). Each entry is a
+    dict with at least ``name`` and ``isDir``.
+    """
+    url = f"{frontend_url}/v3/files?recursive=false&prefix={project}/"
+    try:
+        resp = await authed_fetch(page, frontend_url, url, method="GET")
+    except Exception as exc:
+        raise BrowserError(f"GET {url} failed: {exc}") from exc
+    if resp.status == 404:
+        return []
+    if not resp.ok:
+        raise BrowserError(
+            f"list project files failed: status={resp.status} "
+            f"body={await _safe_body(resp)!r}"
+        )
+    listing = await resp.json()
+    if not isinstance(listing, dict):
+        raise BrowserError(
+            f"list project files: unexpected response shape {type(listing).__name__}; "
+            f"sample={str(listing)[:200]!r}"
+        )
+    return [
+        entry for entry in listing.values()
+        if isinstance(entry, dict) and "name" in entry
+    ]
+
+
+async def clear_project(page: Page, *, project: str, frontend_url: str) -> int:
+    """Delete every file/folder under ``<project>/``. Returns count deleted.
+
+    Mirrors ``fileBrowser.store.deleteProject`` in pmview: list non-recursively
+    at the project root, then ``DELETE /v3/file/<project>/<name>`` per entry,
+    appending ``/`` for folders so the backend cascades.
+    """
+    entries = await _list_project_entries(page, project, frontend_url)
+    if not entries:
+        logger.info("clear_project: %s already empty", project)
+        return 0
+
+    deleted = 0
+    for entry in entries:
+        suffix = "/" if entry.get("isDir") else ""
+        url = f"{frontend_url}/v3/file/{project}/{entry['name']}{suffix}"
+        try:
+            r = await authed_fetch(page, frontend_url, url, method="DELETE")
+        except Exception as exc:
+            logger.warning("clear_project: DELETE %s raised: %s", url, exc)
+            continue
+        if r.ok:
+            deleted += 1
+        else:
+            logger.warning(
+                "clear_project: DELETE %s failed status=%s body=%s",
+                url, r.status, await _safe_body(r, 120),
+            )
+    logger.info(
+        "clear_project: deleted %d/%d entries from project %s",
+        deleted, len(entries), project,
+    )
+    return deleted
 
 
 async def upload_to_project(
     page: Page,
-    path: Path,
+    local_paths: list[Path],
     *,
-    timeout_s: float = 60.0,
+    project: str,
+    frontend_url: str,
+    timeout_s: float = 600.0,
 ) -> None:
-    """Upload ``path`` into the project's current File Browser directory.
+    """Upload ``local_paths`` to the project root via the chonky upload input.
 
-    Requires :func:`open_file_browser` to have been called first so
-    ``BackendFileBrowser`` is mounted — its hidden ``<input type="file">``
-    is the target we drive. The Chonky toolbar "Upload" button is a
-    cosmetic wrapper that clicks the same input, so we skip it and
-    ``set_input_files`` directly. The upload persists via
-    ``PUT /v3/file/{folder}/{name}`` and we wait until the filename
-    appears in the grid before returning.
+    The frontend's ``BackendFileBrowser`` mounts a hidden ``<input type=file>``
+    that ``uploadFilesToCurrentDirectory`` consumes; passing all paths to
+    ``set_input_files`` triggers the same multi-file PUT loop as a manual
+    upload. We then poll the backend listing until every basename is
+    visible, since the chonky grid is virtualized and unreliable.
     """
-    logger.info("uploading %s to project File Browser", path.name)
-    try:
-        await page.locator(locators.PROJECT_UPLOAD_INPUT).first.set_input_files(
-            str(path)
-        )
-    except Exception as exc:
-        raise BrowserError(f"upload of {path} failed: {exc}") from exc
+    if not local_paths:
+        return
+    expected = {p.name for p in local_paths}
 
-    await _wait_for_visible_name(page, path.name, timeout_s=timeout_s)
-    logger.info("uploaded %s is visible in File Browser", path.name)
+    await open_file_browser(page)
+    try:
+        logger.info("uploading %d files to project %s", len(local_paths), project)
+        try:
+            await page.locator(locators.PROJECT_UPLOAD_INPUT).first.set_input_files(
+                [str(p) for p in local_paths]
+            )
+        except Exception as exc:
+            raise BrowserError(f"set_input_files failed: {exc}") from exc
+
+        deadline = time.monotonic() + timeout_s
+        present: set[str] = set()
+        while time.monotonic() < deadline:
+            entries = await _list_project_entries(page, project, frontend_url)
+            present = {e["name"] for e in entries}
+            if expected.issubset(present):
+                logger.info("uploaded %d files to project %s", len(expected), project)
+                return
+            await asyncio.sleep(1.0)
+        missing = expected - present
+        raise BrowserError(
+            f"only {len(present & expected)}/{len(expected)} expected files "
+            f"appeared in {project} within {timeout_s:.0f}s; "
+            f"missing first 5: {sorted(missing)[:5]}"
+        )
+    finally:
+        await close_file_browser(page)
 
 
 async def download_file(

@@ -1,0 +1,12 @@
+id: bixbench-verified
+skill_under_test: bioinformatics
+description: |
+  BixBench-Verified-50 (phylobio, 2025): a curated 50-question subset of
+  BixBench with revisions for clarity, correctness, and context
+  sufficiency. Same schema and capsule format as the parent set.
+difficulty: hard
+requires_browser: true
+default_timeout_s: null    # bioinformatics analyses run as long as they need
+default_expected_cost_usd: 0.50
+rubric_path: rubric.md
+tags: [bixbench, bixbench-verified, bioinformatics, data-analysis]

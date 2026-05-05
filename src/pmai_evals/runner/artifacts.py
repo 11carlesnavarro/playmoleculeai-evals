@@ -101,6 +101,9 @@ class RunArtifactWriter(_CellPaths):
 
     def ensure_dir(self) -> None:
         self.cell_dir.mkdir(parents=True, exist_ok=True)
+        # A stale grade.json from a previous run of this cell would make the
+        # grader's "already graded, skip" guard fire against new artifacts.
+        self.grade_path.unlink(missing_ok=True)
 
     def write_trace(self, trace: Trace) -> None:
         write_json(self.trace_path, trace.to_dict())

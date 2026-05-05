@@ -32,6 +32,9 @@ dev = [
     "ruff>=0.6",
     "pyright>=1.1.380",
 ]
+bixbench = [
+    "huggingface_hub>=0.24",
+]
 
 [project.scripts]
 pmai-evals = "pmai_evals.cli:app"
@@ -86,6 +89,7 @@ reportUnknownArgumentType = false
 [tool.pytest.ini_options]
 testpaths = ["tests", "eval_sets"]
 asyncio_mode = "auto"
+addopts = "--import-mode=importlib"
 markers = [
     "browser: integration test that launches a real browser",
     "e2e: end-to-end test (slow, full harness)",

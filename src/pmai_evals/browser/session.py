@@ -12,7 +12,7 @@ import logging
 import time
 from pathlib import Path
 from types import TracebackType
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from pmai_evals.browser.locators import (
     ACCOUNT_BUTTON,
@@ -31,6 +31,21 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _AUTH_COOKIES: Final[tuple[str, ...]] = ("access_token", "refresh_token", "csrf_token")
+
+
+async def _type_into_label(page: Any, label: str, value: str) -> None:
+    """Focus a labelled input then type per-key, surviving React re-mounts.
+
+    ``Locator.fill`` resolves the element once and then can fail with
+    "element was detached, retrying" when the MUI form re-renders during
+    hydration. Click first to lock focus on the live element, then drive
+    the keyboard so each keystroke is delivered through the focused
+    element rather than a stale node handle.
+    """
+    field = page.get_by_label(label)
+    await field.wait_for(state="visible", timeout=15_000)
+    await field.click()
+    await page.keyboard.type(value)
 
 
 class PMBrowser:
@@ -174,33 +189,53 @@ class PMBrowser:
     # ---- one-shot login (used by setup-auth) ----------------------------
 
     async def login_and_save(self) -> None:
-        """Run the interactive login flow and persist storage state.
+        """Persist storage state, logging in via the form only if needed.
 
-        Uses the email/password from settings. Called only by the
-        ``setup-auth`` CLI command.
+        Visits ``/login`` and races: if the account button appears the
+        frontend already redirected us back (existing storage_state still
+        valid), we skip the form. Otherwise we drive the email/password
+        flow. ``networkidle`` is intentionally avoided: the pmview SPA
+        polls and never quiesces.
         """
 
         if self._context is None:
             raise BrowserError("PMBrowser not entered")
-        if not (self._settings.pm_email and self._settings.pm_password):
-            raise AuthError("PM_EMAIL and PM_PASSWORD must be set in .env to log in")
 
         page = await self._context.new_page()
         try:
             await page.goto(f"{self._settings.pm_frontend_url}/login")
-            await page.get_by_label(EMAIL_LABEL).fill(self._settings.pm_email)
-            await page.get_by_label(PASSWORD_LABEL).fill(self._settings.pm_password)
-            await page.get_by_role(SUBMIT_BUTTON[0], name=SUBMIT_BUTTON[1]).click()
+            account = page.get_by_role(
+                ACCOUNT_BUTTON[0], name=ACCOUNT_BUTTON[1]
+            )
+            email = page.get_by_label(EMAIL_LABEL)
+            account_task = asyncio.create_task(account.wait_for(timeout=30_000))
+            email_task = asyncio.create_task(email.wait_for(timeout=30_000))
+            done, pending = await asyncio.wait(
+                [account_task, email_task], return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
 
-            try:
-                await page.get_by_role(
-                    ACCOUNT_BUTTON[0], name=ACCOUNT_BUTTON[1]
-                ).wait_for(timeout=30_000)
-            except Exception as exc:
-                raise AuthError("login did not reach the dashboard") from exc
+            if account_task in done and account_task.exception() is None:
+                logger.info("already authenticated; refreshing storage state")
+            elif email_task in done and email_task.exception() is None:
+                if not (self._settings.pm_email and self._settings.pm_password):
+                    raise AuthError(
+                        "not logged in and PM_EMAIL / PM_PASSWORD are unset"
+                    )
+                await _type_into_label(page, EMAIL_LABEL, self._settings.pm_email)
+                await _type_into_label(page, PASSWORD_LABEL, self._settings.pm_password)
+                await page.get_by_role(SUBMIT_BUTTON[0], name=SUBMIT_BUTTON[1]).click()
+                try:
+                    await account.wait_for(timeout=30_000)
+                except Exception as exc:
+                    raise AuthError("login did not reach the dashboard") from exc
+            else:
+                raise AuthError(
+                    f"neither login form nor dashboard appeared; url={page.url}"
+                )
 
             await self._wait_for_auth_cookies(timeout_s=10.0)
-
             self._storage_state.parent.mkdir(parents=True, exist_ok=True)
             await self._context.storage_state(path=str(self._storage_state))
             logger.info("storage state saved to %s", self._storage_state)

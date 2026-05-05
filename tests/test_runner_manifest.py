@@ -40,7 +40,6 @@ def _config(**overrides) -> RunConfig:
         "seeds": 1,
         "max_cost_usd": 1.0,
         "headless": True,
-        "tier": None,
         "case_filter": None,
         "run_label": "test",
         "judge_model": "claude-sonnet-4-6",

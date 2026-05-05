@@ -6,10 +6,8 @@
 # trusting absolute dollar figures.
 
 models:
-  # --- flagship: benchmark targets ---
   - id: gpt-5.4
     provider: openai
-    tier: flagship
     input_per_mtok_usd: 5.00
     output_per_mtok_usd: 15.00
     cached_input_per_mtok_usd: 1.25
@@ -17,7 +15,6 @@ models:
 
   - id: claude-sonnet-4-6
     provider: anthropic
-    tier: flagship
     input_per_mtok_usd: 3.00
     output_per_mtok_usd: 15.00
     cached_input_per_mtok_usd: 0.30
@@ -25,16 +22,13 @@ models:
 
   - id: gemini-3.1-pro-preview
     provider: google
-    tier: flagship
     input_per_mtok_usd: 1.25
     output_per_mtok_usd: 5.00
     cached_input_per_mtok_usd: 0.31
     supports_vision: true
 
-  # --- cheap: harness iteration ---
   - id: gpt-5.4-mini
     provider: openai
-    tier: cheap
     input_per_mtok_usd: 0.40
     output_per_mtok_usd: 1.60
     cached_input_per_mtok_usd: 0.10
@@ -42,7 +36,6 @@ models:
 
   - id: gpt-5.4-nano
     provider: openai
-    tier: cheap
     input_per_mtok_usd: 0.10
     output_per_mtok_usd: 0.40
     cached_input_per_mtok_usd: 0.025

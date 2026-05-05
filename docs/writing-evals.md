@@ -249,7 +249,7 @@ free and deterministic.
    ```
 4. Run it for real on the cheapest model:
    ```bash
-   uv run pmai-evals run --eval-set <set> --case <new-id> --tier cheap
+   uv run pmai-evals run --eval-set <set> --case <new-id> --models gpt-5.4-mini
    ```
 5. Inspect the cell directory under `runs/<run_id>/<new-id>/...`.
    Look at `trace.json`, `viewer_state.json`, and `screenshot.png`
