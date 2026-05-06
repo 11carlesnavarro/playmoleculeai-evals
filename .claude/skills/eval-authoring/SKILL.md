@@ -1,6 +1,6 @@
 ---
 name: eval-authoring
-description: Author programmatic eval cases for the playmoleculeai-evals repo (cases.yaml, checks.py, fixtures, dev scripts) grounded in real agent traces. Use whenever the user is adding, designing, drafting, refining, or grading an eval case in this project, including phrases like "new eval", "add a case", "wire up a case", "design a test for chat N", any case-id like `xxx-NNNN`, or work touching cases.yaml, checks.py, the RunArtifact API, or the development/dump_chat_*.py / test_case_*.py dev scripts. Invoke this skill before reading checks.py or starting a new case.
+description: Author programmatic eval cases for the playmoleculeai-evals repo (cases.yaml, checks.py, fixtures, dev scripts) grounded in real agent traces. Use whenever the user is adding, designing, drafting, refining, or grading an eval case in this project, including phrases like "new eval", "add a case", "wire up a case", "design a test for chat N", any case-id like `xxx-NNNN`, or work touching cases.yaml, checks.py, the RunArtifact API, or the development/dump_chat.py / test_case_*.py dev scripts. Invoke this skill before reading checks.py or starting a new case.
 ---
 
 # Eval authoring for playmoleculeai-evals
@@ -17,11 +17,11 @@ A case lives in `eval_sets/<set>/cases.yaml`. The runner spins up a browser-driv
 
 Grading runs `python_check` assertions: each entry under `assertions:` names a function that the runner resolves by import name from `checks.py` of the same set. The function takes `(artifact: RunArtifact, config: dict[str, Any]) -> AssertionResult` and is the only assertion type the framework supports today. `RunArtifact` (in `src/pmai_evals/runner/artifacts.py`) exposes `final_answer()`, `viewer_state()`, `viewer_selection()`, `load_system(name)` (returns a moleculekit `Molecule` reading the post-run exported file), `system_files()`, etc. An optional LLM-judge `rubric` block grades subjective dimensions; default to disabling it (`rubric: { enabled: false }`) unless the case is genuinely about subjective quality.
 
-CLI surface: `pmai-evals run -e <set> -m <model>` runs cases; `pmai-evals grade <run-id>` re-grades; `pmai-evals report <run-id>` summarises. Local sanity check after any change: `uv run pytest eval_sets/<set>/ tests/ --ignore=tests/test_session_auth.py -q`.
+CLI surface: `pmai-evals run -e <set> -m <model>` runs cases; `pmai-evals grade <run-id>` re-grades; `pmai-evals report <run-id>` summarises. Local sanity check after any change: `uv run pytest eval_sets/<set>/ tests/ -q`.
 
 ## Workflow for a new case
 
-1. **Source the intent.** Copy `development/dump_chat_<N>.py`, change `CHAT_ID` and `OUT`, run it. Read the user's prompt, the agent's tool calls, and any failure modes in the trace. Original prompts are often messy (typos, ratio ambiguity, code-mixing); polish but preserve the intellectual challenge that motivated the original task. Cases can also come from category gaps the user wants covered, not only from chats.
+1. **Source the intent.** Run `uv run python development/dump_chat.py --db <db> --chat <id>` to dump a chat to JSONL. Read the user's prompt, the agent's tool calls, and any failure modes in the trace. Original prompts are often messy (typos, ratio ambiguity, code-mixing); polish but preserve the intellectual challenge that motivated the original task. Cases can also come from category gaps the user wants covered, not only from chats.
 
 2. **Confirm the case fits the set's scope.** Each eval set has a policy. If the source chat exercises a workflow outside that policy, propose an in-scope reframe before designing grading.
 

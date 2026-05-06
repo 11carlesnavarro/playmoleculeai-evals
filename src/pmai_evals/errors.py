@@ -1,14 +1,14 @@
 """Typed exceptions raised across the harness.
 
 Catching bare ``Exception`` is forbidden everywhere except the per-case
-isolation barrier in ``runner.executor`` (spec §6.3).
+isolation barrier in ``runner.executor``.
 """
 
 from __future__ import annotations
 
 
 class PMAIEvalsError(Exception):
-    """Base class. Anything we raise should subclass this."""
+    """Base class for all harness errors."""
 
 
 class ConfigError(PMAIEvalsError):
@@ -36,11 +36,11 @@ class ChatTimeoutError(BrowserError):
 
 
 class TraceNotFoundError(PMAIEvalsError):
-    """No row found in SQLite for the given chat id."""
+    """No trace was returned for the given chat id."""
 
 
 class TraceParseError(PMAIEvalsError):
-    """A row exists but the JSON payload could not be parsed."""
+    """A trace payload could not be parsed."""
 
 
 class BudgetExceededError(PMAIEvalsError):
@@ -49,10 +49,6 @@ class BudgetExceededError(PMAIEvalsError):
 
 class JudgeError(PMAIEvalsError):
     """The LLM judge could not produce a valid grade."""
-
-
-class RunFailedError(PMAIEvalsError):
-    """A single case failed in a way that should be recorded as ``status: failed``."""
 
 
 class HarnessError(PMAIEvalsError):

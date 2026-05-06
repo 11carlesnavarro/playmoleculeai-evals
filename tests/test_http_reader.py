@@ -15,7 +15,6 @@ def test_parse_trace_basic(sample_history: list[dict[str, Any]]) -> None:
     assert trace.model == "test-model"
     assert trace.status == TraceStatus.completed
     assert len(trace.messages) == 4
-    assert trace.raw_metadata == {"source": "http"}
 
 
 def test_parse_trace_extracts_tool_call(sample_history: list[dict[str, Any]]) -> None:

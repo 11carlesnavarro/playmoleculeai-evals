@@ -119,4 +119,3 @@ change, not a harness change.
 
 - **Author an eval** → [`writing-evals.md`](writing-evals.md)
 - **Check what the harness must do and produce** → [`SPEC.md`](SPEC.md)
-- **Understand the roadmap** → [`plan.md`](plan.md)

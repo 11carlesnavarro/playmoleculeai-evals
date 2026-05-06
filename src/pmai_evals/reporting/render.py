@@ -11,25 +11,22 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 
-# --- markdown -------------------------------------------------------------
-
 def render_markdown(benchmark: dict[str, Any]) -> str:
-    lines: list[str] = []
-    lines.append(f"# Benchmark — {benchmark.get('eval_set', '?')}")
-    lines.append("")
-    lines.append(f"- **Run id**: `{benchmark.get('run_id', '?')}`")
-    lines.append(f"- **Total cost**: ${benchmark.get('total_cost_usd', 0):.4f}")
+    lines: list[str] = [
+        f"# Benchmark — {benchmark.get('eval_set', '?')}",
+        "",
+        f"- **Run id**: `{benchmark.get('run_id', '?')}`",
+        f"- **Total cost**: ${benchmark.get('total_cost_usd', 0):.4f}",
+    ]
     if benchmark.get("aborted_over_budget"):
         lines.append("- **Aborted over budget**: yes")
-    lines.append("")
-    lines.append("## Models")
-    lines.append("")
-    lines.append(
-        "| Model | Cases (✓/total) | Assertions | Rubric pass | Rubric mean | Cost (USD) |"
-    )
-    lines.append(
-        "|---|---|---|---|---|---|"
-    )
+    lines += [
+        "",
+        "## Models",
+        "",
+        "| Model | Cases (✓/total) | Assertions | Rubric pass | Rubric mean | Cost (USD) |",
+        "|---|---|---|---|---|---|",
+    ]
     models = sorted(
         benchmark.get("models", []),
         key=lambda m: (-m.get("assertion_pass_rate", 0), m.get("model", "")),
@@ -38,43 +35,30 @@ def render_markdown(benchmark: dict[str, Any]) -> str:
         cases = f"{m['cases_completed']}/{m['cases_total']}"
         ar = f"{m['assertions_passed']}/{m['assertions_total']} ({m['assertion_pass_rate']:.0%})"
         rp = f"{m['rubric_pass']}/{m['rubric_total']}" if m["rubric_total"] else "—"
-        rm = (
-            f"{m['rubric_mean']:.2f}" if m.get("rubric_mean") is not None else "—"
-        )
+        rm = f"{m['rubric_mean']:.2f}" if m.get("rubric_mean") is not None else "—"
         lines.append(
             f"| `{m['model']}` | {cases} | {ar} | {rp} | {rm} | ${m['cost_usd']:.4f} |"
         )
 
-    lines.append("")
-    lines.append("## Per-case breakdown")
-    lines.append("")
-    cases = benchmark.get("cases") or {}
-    for case_id, info in sorted(cases.items()):
-        lines.append(f"### `{case_id}`")
-        lines.append("")
-        lines.append("| Model | Assertions | Rubric |")
-        lines.append("|---|---|---|")
+    lines += ["", "## Per-case breakdown", ""]
+    for case_id, info in sorted((benchmark.get("cases") or {}).items()):
+        lines += [f"### `{case_id}`", "", "| Model | Assertions | Rubric |", "|---|---|---|"]
         for model, stats in sorted(info.get("models", {}).items()):
             ar = f"{stats['assertions_passed']}/{stats['assertions_total']}"
-            rp = stats.get("rubric_passed")
-            rp_str = "✓" if rp is True else ("✗" if rp is False else "—")
-            lines.append(f"| `{model}` | {ar} | {rp_str} |")
+            passed = stats.get("rubric_passed")
+            rp = "✓" if passed is True else ("✗" if passed is False else "—")
+            lines.append(f"| `{model}` | {ar} | {rp} |")
         lines.append("")
     return "\n".join(lines) + "\n"
 
-
-# --- html -----------------------------------------------------------------
 
 def render_html(benchmark: dict[str, Any]) -> str:
     env = Environment(
         loader=FileSystemLoader(str(TEMPLATE_DIR)),
         autoescape=select_autoescape(["html"]),
     )
-    template = env.get_template("benchmark.html.j2")
-    return template.render(b=benchmark)
+    return env.get_template("benchmark.html.j2").render(b=benchmark)
 
-
-# --- json -----------------------------------------------------------------
 
 def render_json(benchmark: dict[str, Any]) -> str:
     return json.dumps(benchmark, indent=2, sort_keys=True) + "\n"

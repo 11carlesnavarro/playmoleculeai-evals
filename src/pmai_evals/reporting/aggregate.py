@@ -32,27 +32,28 @@ class ModelStats:
 
     @property
     def assertion_pass_rate(self) -> float:
-        return (self.assertions_passed / self.assertions_total) if self.assertions_total else 0.0
+        return self.assertions_passed / self.assertions_total if self.assertions_total else 0.0
 
     @property
     def rubric_pass_rate(self) -> float:
-        return (self.rubric_pass / self.rubric_total) if self.rubric_total else 0.0
+        return self.rubric_pass / self.rubric_total if self.rubric_total else 0.0
 
     @property
     def rubric_mean(self) -> float | None:
-        if not self.rubric_scores:
-            return None
-        return sum(self.rubric_scores) / len(self.rubric_scores)
+        return sum(self.rubric_scores) / len(self.rubric_scores) if self.rubric_scores else None
 
     @property
     def rubric_stderr(self) -> float | None:
         if len(self.rubric_scores) < 2:
             return None
-        mean = self.rubric_mean or 0
+        mean = self.rubric_mean or 0.0
         variance = sum((s - mean) ** 2 for s in self.rubric_scores) / (len(self.rubric_scores) - 1)
         return math.sqrt(variance / len(self.rubric_scores))
 
     def to_dict(self) -> dict[str, Any]:
+        def _round(value: float | None, ndigits: int) -> float | None:
+            return None if value is None else round(value, ndigits)
+
         return {
             "model": self.model,
             "cases_total": self.cases_total,
@@ -66,48 +67,46 @@ class ModelStats:
             "rubric_pass": self.rubric_pass,
             "rubric_total": self.rubric_total,
             "rubric_pass_rate": round(self.rubric_pass_rate, 4),
-            "rubric_mean": (
-                round(self.rubric_mean, 4) if self.rubric_mean is not None else None
-            ),
-            "rubric_stderr": (
-                round(self.rubric_stderr, 4) if self.rubric_stderr is not None else None
-            ),
+            "rubric_mean": _round(self.rubric_mean, 4),
+            "rubric_stderr": _round(self.rubric_stderr, 4),
             "cost_usd": round(self.cost_usd, 6),
         }
 
 
+_STATUS_FIELD = {
+    "completed": "cases_completed",
+    "failed": "cases_failed",
+    "timed_out": "cases_timed_out",
+    "skipped_over_budget": "cases_skipped",
+}
+
+
 def aggregate_run(run_dir: Path) -> dict[str, Any]:
     """Build the benchmark summary dict and write ``benchmark.json``."""
-
     if not run_dir.is_dir():
         raise FileNotFoundError(f"run dir not found: {run_dir}")
 
     summary = read_json_or(run_dir / "summary.json", {})
-
-    by_model: dict[str, ModelStats] = defaultdict(lambda: ModelStats(model=""))
-    per_case_breakdown: dict[str, dict[str, Any]] = defaultdict(
+    by_model: dict[str, ModelStats] = {}
+    per_case: dict[str, dict[str, Any]] = defaultdict(
         lambda: {"models": {}, "rubric": {}}
     )
 
+    def _stats(model: str) -> ModelStats:
+        return by_model.setdefault(model, ModelStats(model=model))
+
     for case_summary in summary.get("cases", []):
-        model = case_summary["model"]
-        stats = by_model.setdefault(model, ModelStats(model=model))
+        stats = _stats(case_summary["model"])
         stats.cases_total += 1
         stats.cost_usd += float(case_summary.get("cost_usd") or 0)
-        status = case_summary.get("status")
-        if status == "completed":
-            stats.cases_completed += 1
-        elif status == "failed":
-            stats.cases_failed += 1
-        elif status == "timed_out":
-            stats.cases_timed_out += 1
-        elif status == "skipped_over_budget":
-            stats.cases_skipped += 1
+        field_name = _STATUS_FIELD.get(case_summary.get("status"))
+        if field_name:
+            setattr(stats, field_name, getattr(stats, field_name) + 1)
 
     for _cell, grade in iter_grade_files(run_dir):
         model = grade.get("model", "?")
         case_id = grade.get("case_id", "?")
-        stats = by_model.setdefault(model, ModelStats(model=model))
+        stats = _stats(model)
         s = grade.get("summary") or {}
         stats.assertions_passed += int(s.get("assertions_passed") or 0)
         stats.assertions_total += int(s.get("assertions_total") or 0)
@@ -119,8 +118,8 @@ def aggregate_run(run_dir: Path) -> dict[str, Any]:
             score = rubric.get("overall_score")
             if isinstance(score, int | float):
                 stats.rubric_scores.append(float(score))
-                per_case_breakdown[case_id]["rubric"][model] = float(score)
-        per_case_breakdown[case_id]["models"][model] = {
+                per_case[case_id]["rubric"][model] = float(score)
+        per_case[case_id]["models"][model] = {
             "assertions_passed": int(s.get("assertions_passed") or 0),
             "assertions_total": int(s.get("assertions_total") or 0),
             "rubric_passed": s.get("rubric_passed"),
@@ -132,7 +131,7 @@ def aggregate_run(run_dir: Path) -> dict[str, Any]:
         "total_cost_usd": summary.get("total_cost_usd"),
         "aborted_over_budget": summary.get("aborted_over_budget"),
         "models": [stats.to_dict() for stats in by_model.values()],
-        "cases": per_case_breakdown,
+        "cases": dict(per_case),
     }
     out = run_dir / "benchmark.json"
     write_json(out, benchmark)

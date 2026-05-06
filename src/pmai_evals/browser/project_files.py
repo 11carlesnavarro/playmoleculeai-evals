@@ -1,10 +1,9 @@
-"""Drive the pmview File Browser panel to move project files in and out.
+"""Drive the pmview File Browser panel to manage project files.
 
-Uploads go through the frontend's hidden ``<input type=file>`` (same path
-the chonky toolbar drives), which keeps the auth refresh-token flow under
-the page. The chonky grid is virtualized so we cannot confirm completion
-by reading visible names; instead we poll the backend listing endpoint
-the same code uses for ``clear_project``.
+Uploads go through the frontend's hidden ``<input type=file>`` (the same
+path the chonky toolbar drives). The chonky grid is virtualized, so we
+confirm completion by polling the backend listing endpoint instead of
+scraping visible names.
 """
 
 from __future__ import annotations
@@ -23,58 +22,32 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_CSRF_HEADER = "X-CSRF-Token"
+_CSRF_COOKIE = "csrf_token"
 
-async def open_file_browser(page: Page, *, timeout_s: float = 60.0) -> None:
-    """Open the File Browser panel and wait for the Chonky grid to mount."""
+
+async def _open_file_browser(page: Page, *, timeout_s: float = 60.0) -> None:
+    timeout_ms = int(timeout_s * 1000)
     try:
-        await page.locator(locators.FILE_BROWSER_ICON).first.click(
-            timeout=int(timeout_s * 1000)
+        await page.locator(locators.FILE_BROWSER_ICON).first.click(timeout=timeout_ms)
+        await page.locator(locators.CHONKY_ROOT).first.wait_for(
+            state="visible", timeout=timeout_ms
         )
     except Exception as exc:
         raise BrowserError(f"could not open File Browser panel: {exc}") from exc
-
-    try:
-        await page.locator(locators.CHONKY_ROOT).first.wait_for(
-            state="visible", timeout=int(timeout_s * 1000)
-        )
-    except Exception as exc:
-        raise BrowserError(f"File Browser panel never rendered: {exc}") from exc
     logger.info("File Browser panel open")
 
 
-async def close_file_browser(page: Page, *, timeout_s: float = 10.0) -> None:
-    """Close the File Browser panel. No-op if it isn't currently open."""
+async def _close_file_browser(page: Page, *, timeout_s: float = 10.0) -> None:
     chonky = page.locator(locators.CHONKY_ROOT).first
     if not await chonky.is_visible():
         return
+    timeout_ms = int(timeout_s * 1000)
     try:
-        await page.locator(locators.FILE_BROWSER_ICON).first.click(
-            timeout=int(timeout_s * 1000)
-        )
+        await page.locator(locators.FILE_BROWSER_ICON).first.click(timeout=timeout_ms)
+        await chonky.wait_for(state="hidden", timeout=timeout_ms)
     except Exception as exc:
         raise BrowserError(f"could not close File Browser panel: {exc}") from exc
-    try:
-        await chonky.wait_for(state="hidden", timeout=int(timeout_s * 1000))
-    except Exception as exc:
-        raise BrowserError(f"File Browser panel never closed: {exc}") from exc
-    logger.info("File Browser panel closed")
-
-
-async def dump_visible_text(page: Page) -> str:
-    """Return the raw inner text of the Chonky grid for debugging.
-
-    Chonky class names are webpack-hashed so we don't try to parse the
-    tree — a plain text dump is enough to see which files are listed.
-    """
-    root = page.locator(locators.CHONKY_ROOT).first
-    try:
-        return (await root.inner_text()).strip()
-    except Exception as exc:
-        raise BrowserError(f"could not read File Browser contents: {exc}") from exc
-
-
-_CSRF_HEADER = "X-CSRF-Token"
-_CSRF_COOKIE = "csrf_token"
 
 
 async def _read_csrf_token(page: Page, frontend_url: str) -> str:
@@ -84,9 +57,9 @@ async def _read_csrf_token(page: Page, frontend_url: str) -> str:
     return ""
 
 
-async def _safe_body(resp: object, limit: int = 200) -> str:
+async def _safe_body(resp: Any, limit: int = 200) -> str:
     try:
-        return (await resp.text())[:limit]  # type: ignore[attr-defined]
+        return (await resp.text())[:limit]
     except Exception:
         return ""
 
@@ -99,25 +72,23 @@ async def authed_fetch(
     method: str = "GET",
     **kwargs: Any,
 ) -> Any:
-    """Fetch with auto-refresh on 401, mirroring pmview's ``callAuthenticatedApiEndpoint``.
+    """Fetch with auto-refresh on 401, mirroring pmview's auth flow.
 
-    Long-running cases outlive the access-token TTL; without a refresh
-    handler, the next API call (typically ``clear_project``'s listing)
-    fails the whole case with a 401. We replicate the frontend's flow:
-    on 401, ``POST /v3/auth/refresh-token`` (cookies carry the refresh
-    token) and replay the original request once with the rotated CSRF.
+    Long-running cases outlive the access-token TTL. On 401 we POST to
+    ``/v3/auth/refresh-token`` (cookies carry the refresh token) and replay
+    the original request once with the rotated CSRF.
     """
     headers = dict(kwargs.pop("headers", None) or {})
     headers[_CSRF_HEADER] = await _read_csrf_token(page, frontend_url)
     resp = await page.request.fetch(url, method=method, headers=headers, **kwargs)
     if resp.status != 401:
         return resp
-    refresh_resp = await page.request.fetch(
+    refresh = await page.request.fetch(
         f"{frontend_url}/v3/auth/refresh-token",
         method="POST",
         headers={_CSRF_HEADER: headers[_CSRF_HEADER]},
     )
-    if not refresh_resp.ok:
+    if not refresh.ok:
         return resp
     headers[_CSRF_HEADER] = await _read_csrf_token(page, frontend_url)
     return await page.request.fetch(url, method=method, headers=headers, **kwargs)
@@ -126,11 +97,7 @@ async def authed_fetch(
 async def _list_project_entries(
     page: Page, project: str, frontend_url: str
 ) -> list[dict[str, Any]]:
-    """Fetch immediate children of ``<project>/`` from the backend.
-
-    Returns ``[]`` if the project doesn't exist yet (404). Each entry is a
-    dict with at least ``name`` and ``isDir``.
-    """
+    """Immediate children of ``<project>/`` from the backend, or [] if 404."""
     url = f"{frontend_url}/v3/files?recursive=false&prefix={project}/"
     try:
         resp = await authed_fetch(page, frontend_url, url, method="GET")
@@ -140,28 +107,18 @@ async def _list_project_entries(
         return []
     if not resp.ok:
         raise BrowserError(
-            f"list project files failed: status={resp.status} "
-            f"body={await _safe_body(resp)!r}"
+            f"list project files failed: status={resp.status} body={await _safe_body(resp)!r}"
         )
     listing = await resp.json()
     if not isinstance(listing, dict):
         raise BrowserError(
-            f"list project files: unexpected response shape {type(listing).__name__}; "
-            f"sample={str(listing)[:200]!r}"
+            f"list project files: unexpected shape {type(listing).__name__}"
         )
-    return [
-        entry for entry in listing.values()
-        if isinstance(entry, dict) and "name" in entry
-    ]
+    return [e for e in listing.values() if isinstance(e, dict) and "name" in e]
 
 
 async def clear_project(page: Page, *, project: str, frontend_url: str) -> int:
-    """Delete every file/folder under ``<project>/``. Returns count deleted.
-
-    Mirrors ``fileBrowser.store.deleteProject`` in pmview: list non-recursively
-    at the project root, then ``DELETE /v3/file/<project>/<name>`` per entry,
-    appending ``/`` for folders so the backend cascades.
-    """
+    """Delete every file/folder under ``<project>/``. Returns count deleted."""
     entries = await _list_project_entries(page, project, frontend_url)
     if not entries:
         logger.info("clear_project: %s already empty", project)
@@ -200,17 +157,14 @@ async def upload_to_project(
 ) -> None:
     """Upload ``local_paths`` to the project root via the chonky upload input.
 
-    The frontend's ``BackendFileBrowser`` mounts a hidden ``<input type=file>``
-    that ``uploadFilesToCurrentDirectory`` consumes; passing all paths to
-    ``set_input_files`` triggers the same multi-file PUT loop as a manual
-    upload. We then poll the backend listing until every basename is
-    visible, since the chonky grid is virtualized and unreliable.
+    Polls the backend listing until every basename is visible (the chonky
+    grid is virtualized and unreliable as a completion signal).
     """
     if not local_paths:
         return
     expected = {p.name for p in local_paths}
 
-    await open_file_browser(page)
+    await _open_file_browser(page)
     try:
         logger.info("uploading %d files to project %s", len(local_paths), project)
         try:
@@ -236,51 +190,4 @@ async def upload_to_project(
             f"missing first 5: {sorted(missing)[:5]}"
         )
     finally:
-        await close_file_browser(page)
-
-
-async def download_file(
-    page: Page,
-    filename: str,
-    dest_dir: Path,
-    *,
-    timeout_s: float = 120.0,
-) -> Path:
-    """Select a file by visible name and download it via the toolbar.
-
-    The returned path is where the blob was saved inside ``dest_dir``
-    (using the browser's suggested filename when available).
-    """
-    dest_dir.mkdir(parents=True, exist_ok=True)
-
-    row = page.locator(locators.CHONKY_ROOT).first.get_by_text(filename, exact=True).first
-    try:
-        await row.wait_for(state="visible", timeout=int(timeout_s * 1000))
-        await row.click()
-    except Exception as exc:
-        raise BrowserError(
-            f"could not select {filename!r} in File Browser: {exc}"
-        ) from exc
-
-    download_button = page.get_by_role(
-        locators.DOWNLOAD_SELECTED_BUTTON[0],
-        name=locators.DOWNLOAD_SELECTED_BUTTON[1],
-    )
-    # Chonky enables toolbar actions a tick after the selection event.
-    for _ in range(20):
-        if await download_button.is_enabled():
-            break
-        await asyncio.sleep(0.25)
-
-    try:
-        async with page.expect_download(timeout=timeout_s * 1000) as info:
-            await download_button.click()
-        download = await info.value
-    except Exception as exc:
-        raise BrowserError(f"download of {filename!r} failed: {exc}") from exc
-
-    suggested = download.suggested_filename or filename
-    target = dest_dir / suggested
-    await download.save_as(str(target))
-    logger.info("downloaded %s -> %s", filename, target)
-    return target
+        await _close_file_browser(page)

@@ -1,7 +1,7 @@
 """Top-level pydantic models shared across layers.
 
 Layer-local types live in the layer's own ``schemas.py`` (e.g.
-``trace/schemas.py``); cross-layer types live here.
+``trace/schemas.py``). Cross-layer types live here.
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ class CaseStatus(StrEnum):
     failed = "failed"
     timed_out = "timed_out"
     skipped_over_budget = "skipped_over_budget"
-    pending = "pending"
 
 
 # --- model registry --------------------------------------------------------
@@ -64,21 +63,30 @@ class AssertionSpec(BaseModel):
     type: str
 
 
+class RubricDimension(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    question: str
+    scale: tuple[int, int] = (1, 5)
+
+
+class Rubric(BaseModel):
+    """A rubric: a list of dimensions plus a pass threshold over the mean."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dimensions: list[RubricDimension] = Field(default_factory=list)
+    pass_threshold: float = 3.5
+
+
 class RubricCaseConfig(BaseModel):
     """Per-case rubric override."""
 
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = True
-    dimensions: list[RubricDimensionSpec] | None = None
-
-
-class RubricDimensionSpec(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    question: str
-    scale: tuple[int, int] = (1, 5)
+    dimensions: list[RubricDimension] | None = None
 
 
 class ProjectPreload(BaseModel):
@@ -308,7 +316,3 @@ class PairwiseGrade(BaseModel):
     winner: Literal["A", "B", "tie"]
     justification: str
     evidence: list[str] = Field(default_factory=list)
-
-
-# Resolve forward refs
-RubricCaseConfig.model_rebuild()

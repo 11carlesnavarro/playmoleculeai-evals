@@ -222,7 +222,6 @@ def parse_trace(
 
     return Trace(
         chat_id=chat_id,
-        chat_pk=0,
         model=model,
         messages=tuple(messages),
         tool_calls=tuple(tool_calls),
@@ -232,7 +231,4 @@ def parse_trace(
         ),
         final_answer=last_assistant_text or "",
         status=status,
-        project=None,
-        user_id=None,
-        raw_metadata={"source": "http"},
     )

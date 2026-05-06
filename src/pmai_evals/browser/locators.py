@@ -1,85 +1,52 @@
 """Single source of truth for UI selectors.
 
-If a locator changes in the frontend, edit it here only. Tests and the
-runner reference these constants by name, never inline. Use Playwright
-``getByRole(role, name=...)`` or ``getByText(...)`` — never CSS.
+Use Playwright ``getByRole(role, name=...)`` or ``getByText(...)``, never
+CSS, except where the frontend offers no other unambiguous handle (icon
+testids, hidden inputs).
 """
 
 from __future__ import annotations
 
 from typing import Final
 
-# (role, accessible name) — fed to ``page.get_by_role(role, name=...)``.
+# (role, accessible name) tuples for ``page.get_by_role(role, name=...)``.
 PROMPT_INPUT: Final[tuple[str, str]] = ("textbox", "Ask anything.")
 REGENERATE_BUTTON: Final[tuple[str, str]] = ("button", "Regenerate")
-NEW_CHAT_BUTTON: Final[tuple[str, str]] = ("button", "New chat")
 ACCOUNT_BUTTON: Final[tuple[str, str]] = ("button", "Account")
 
-# Chat settings dialog hosts the model picker. The dropdown is a MUI
-# ``TextField select``, which renders as a ``combobox`` with accessible
-# name "Model"; each ``<MenuItem>`` becomes an ``option`` whose name is
-# the raw model id (pmview uses ``label === value``).
-#
-# ``SETTINGS_BUTTON_LABEL`` is matched via ``get_by_label`` rather than
-# ``get_by_role`` because molstar ships two ``<button title="Settings">``
-# controls in its viewer panel — both contribute to the role-based
-# accessible name and force a strict-mode violation. Only the MUI
-# IconButton has an explicit ``aria-label``, and ``get_by_label`` matches
-# labels, not tooltips, so this single string is unambiguous.
+# Chat settings dialog hosts the model picker. ``SETTINGS_BUTTON_LABEL`` is
+# matched via ``get_by_label`` because molstar ships two ``<button title="Settings">``
+# controls; only the MUI IconButton has an explicit ``aria-label``.
 SETTINGS_BUTTON_LABEL: Final[str] = "Settings"
 SETTINGS_DIALOG: Final[tuple[str, str]] = ("dialog", "Settings")
 MODEL_SELECT: Final[tuple[str, str]] = ("combobox", "Model")
 
-# Login form labels (used by setup-auth).
+# Login form (used by setup-auth).
 EMAIL_LABEL: Final[str] = "Email"
 PASSWORD_LABEL: Final[str] = "Password"
 SUBMIT_BUTTON: Final[tuple[str, str]] = ("button", "Submit")
 
-# pmview sidebar "Add Files" flow — drives the Get-PDB dialog and the
-# hidden file input that backs the "Open" menu item. ``CONFIRM_BUTTON``
-# is reused by SaveSystemDialog, which also renders a "Confirm" button.
+# pmview sidebar "Add Files" flow.
 ADD_FILES_BUTTON: Final[tuple[str, str]] = ("button", "Add Files")
 GET_PDB_MENU_ITEM: Final[tuple[str, str]] = ("menuitem", "Get PDB")
 PDB_ID_FIELD: Final[tuple[str, str]] = ("textbox", "4 letter PDB identifier")
 CONFIRM_BUTTON: Final[tuple[str, str]] = ("button", "Confirm")
-# Stable element id on the hidden <input type="file"> inside LoadFileMenuItem.
 FILE_UPLOAD_INPUT: Final[str] = "#raised-button-file"
 
-# File Browser panel + Chonky toolbar. The sidebar entry is an icon-only
-# MUI ListItemButton with no aria-label, so ``get_by_role`` can't find it
-# by accessible name. We target the FolderOpen icon that MUI ships with
-# ``data-testid="FolderOpenIcon"`` by default — it's unique in the sidebar.
+# File Browser panel + Chonky toolbar. The sidebar entry is icon-only with
+# no aria-label, so we target the FolderOpen icon by its MUI testid.
 FILE_BROWSER_ICON: Final[str] = "[data-testid='FolderOpenIcon']"
-DOWNLOAD_SELECTED_BUTTON: Final[tuple[str, str]] = (
-    "button",
-    "Download selected files",
-)
-# Chonky mounts its grid inside an element carrying a class containing
-# "chonkyRoot" (the exact name is webpack-hashed in production, so match
-# by substring).
 CHONKY_ROOT: Final[str] = "[class*='chonkyRoot']"
 
-# BackendFileBrowser's hidden ``<input type="file" multiple>`` that the
-# Chonky "Upload" toolbar button clicks. Distinguished from the sidebar
-# "Add Files → Open" input (``#raised-button-file``) by id exclusion —
-# both inputs exist in the DOM when the File Browser panel is open.
+# BackendFileBrowser's hidden ``<input type="file" multiple>`` driven by the
+# Chonky Upload toolbar button. Distinguished from the sidebar Open input
+# (``#raised-button-file``) by id exclusion.
 PROJECT_UPLOAD_INPUT: Final[str] = "input[type='file']:not(#raised-button-file)"
 
-# Systems panel — per-system "⋮" menu + SaveSystemDialog. MUI
-# @mui/icons-material icons expose ``data-testid="<Name>Icon"`` by default,
-# which is how we find the more-options button without touching pmview.
-SYSTEM_MORE_ICON: Final[str] = "[data-testid='MoreVertIcon']"
-SYSTEM_DOWNLOAD_MENU_ITEM: Final[tuple[str, str]] = ("menuitem", "Download")
-SAVE_FORMAT_FIELD: Final[str] = "#download-file-select-format"
-
-# Sidebar "Export Viewer State" button. Two variants exist in pmview:
-# a single ListItemButton (tooltip "Export Viewer State") and a popup
-# menu whose outer button has tooltip "Export" and inner menu item
-# "Export Viewer State". Both wrap a ``<SaveIcon />`` as their icon, so
-# we locate by the MUI-default testid and — if a popup opens after the
-# click — follow up with the menu item.
+# Sidebar "Export Viewer State". Two pmview variants exist: a single
+# ListItemButton with tooltip "Export Viewer State" and a popup whose
+# button has tooltip "Export" and inner menu item "Export Viewer State".
+# Both wrap a SaveIcon, so we locate by the MUI testid and follow up
+# with the menu item if the popup appears.
 EXPORT_VIEWER_ICON: Final[str] = "[data-testid='SaveIcon']"
-EXPORT_VIEWER_MENU_ITEM: Final[tuple[str, str]] = (
-    "menuitem",
-    "Export Viewer State",
-)
+EXPORT_VIEWER_MENU_ITEM: Final[tuple[str, str]] = ("menuitem", "Export Viewer State")

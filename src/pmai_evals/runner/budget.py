@@ -1,10 +1,9 @@
 """Cost ceiling enforcement.
 
 The runner consults a single :class:`Budget` per run. ``charge`` is called
-once after each rollout (synchronous, fast). ``check`` is called *before* the
-next rollout begins; if the budget is exhausted it raises
-:class:`~pmai_evals.errors.BudgetExceededError`, which the executor catches
-to write a partial summary and exit with code 2.
+after each rollout, ``check`` is called before the next one. When the
+ceiling is hit, ``check`` raises :class:`BudgetExceededError`, which the
+executor catches to write a partial summary and exit with code 2.
 """
 
 from __future__ import annotations
@@ -29,8 +28,6 @@ class Budget:
         self._journal_path = journal_path
         self._save()
 
-    # ---- public API ------------------------------------------------------
-
     @property
     def total_cost_usd(self) -> float:
         return self._journal.total_cost_usd
@@ -44,7 +41,7 @@ class Budget:
         return max(self._journal.max_cost_usd - self._journal.total_cost_usd, 0.0)
 
     def check(self) -> None:
-        """Raise if we are already over budget. Call before each rollout."""
+        """Raise if we're already over budget. Call before each rollout."""
         if self._journal.total_cost_usd >= self._journal.max_cost_usd:
             raise BudgetExceededError(
                 f"budget exhausted: ${self._journal.total_cost_usd:.4f} "
@@ -62,7 +59,6 @@ class Budget:
         cached_tokens: int = 0,
     ) -> CostCharge:
         """Add one rollout's cost to the running total and persist."""
-
         cost = cost_for_usage(
             model_id=model,
             input_tokens=input_tokens,
@@ -83,19 +79,13 @@ class Budget:
         self._save()
         logger.info(
             "charged %s/%s seed=%d cost=$%.4f total=$%.4f / $%.2f",
-            case_id,
-            model,
-            seed,
-            cost,
-            self._journal.total_cost_usd,
-            self._journal.max_cost_usd,
+            case_id, model, seed, cost,
+            self._journal.total_cost_usd, self._journal.max_cost_usd,
         )
         return charge
 
     def snapshot(self) -> CostJournal:
         return self._journal.model_copy(deep=True)
-
-    # ---- persistence -----------------------------------------------------
 
     def _save(self) -> None:
         self._journal_path.parent.mkdir(parents=True, exist_ok=True)

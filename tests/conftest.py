@@ -35,7 +35,6 @@ def _make_trace_dict(
 ) -> dict[str, Any]:
     return {
         "chat_id": "abc",
-        "chat_pk": 1,
         "model": "test-model",
         "messages": [],
         "tool_calls": tool_calls or [],
@@ -48,9 +47,6 @@ def _make_trace_dict(
         "metrics": {"ttft_ms": 200, "total_ms": 1000, "tool_latency_ms": 50},
         "final_answer": final_answer,
         "status": status,
-        "project": "test",
-        "user_id": None,
-        "raw_metadata": {},
     }
 
 

@@ -1,22 +1,20 @@
 """Drive the (case × model × seed) matrix end-to-end.
 
-Spec §4.7. Per-case flow lives in :func:`_run_one`. Per-case exceptions are
-caught at the isolation barrier and recorded as ``status: failed`` — they
-do not poison the run.
+Per-case exceptions are caught at the isolation barrier and recorded as
+``status: failed``, so a single failure does not poison the run.
 """
 
 from __future__ import annotations
 
 import logging
 import subprocess
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypeVar
 
-from pmai_evals._io import write_json
-from pmai_evals.browser.project_files import (
-    clear_project,
-    upload_to_project,
-)
+from pmai_evals._io import read_json_or, write_json
+from pmai_evals.browser.project_files import clear_project, upload_to_project
 from pmai_evals.browser.viewer_loader import (
     export_viewer_state,
     list_system_names,
@@ -33,7 +31,7 @@ from pmai_evals.errors import (
     TraceNotFoundError,
 )
 from pmai_evals.pricing import cost_for_usage
-from pmai_evals.runner.artifacts import RunArtifactWriter
+from pmai_evals.runner.artifacts import RunArtifactWriter, CellPaths, iter_cell_paths
 from pmai_evals.runner.budget import Budget
 from pmai_evals.runner.manifest import MatrixEntry, build_manifest, write_manifest
 from pmai_evals.schemas import (
@@ -49,8 +47,8 @@ from pmai_evals.trace import parse_trace
 
 logger = logging.getLogger(__name__)
 
+T = TypeVar("T")
 
-# --- run id helpers --------------------------------------------------------
 
 def make_run_id(eval_set_id: str, label: str, *, now: datetime | None = None) -> str:
     moment = (now or datetime.now(UTC)).strftime("%Y%m%d-%H%M%S")
@@ -59,7 +57,6 @@ def make_run_id(eval_set_id: str, label: str, *, now: datetime | None = None) ->
 
 
 def _read_git_sha() -> str | None:
-    """Return the project HEAD SHA, or None if git or the repo is unavailable."""
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -72,14 +69,6 @@ def _read_git_sha() -> str | None:
     if result.returncode != 0:
         return None
     return result.stdout.strip() or None
-
-
-def _write_run_json(run_dir: Path, record: RunRecord) -> None:
-    write_json(run_dir / "run.json", record.model_dump(mode="json"))
-
-
-def _write_summary(run_dir: Path, summary: RunSummary) -> None:
-    write_json(run_dir / "summary.json", summary.model_dump(mode="json"))
 
 
 def _artifact_rel(entry: MatrixEntry) -> str:
@@ -104,7 +93,80 @@ def _failure_summary(
     )
 
 
-# --- main entrypoint -------------------------------------------------------
+def _record_failure(
+    run_dir: Path, entry: MatrixEntry, status: CaseStatus, error: str | None = None,
+) -> None:
+    """Persist a failure disposition to disk so it survives cancellation."""
+    writer = RunArtifactWriter(
+        run_dir=run_dir, case_id=entry.case.id, model=entry.model, seed=entry.seed,
+    )
+    writer.ensure_dir()
+    writer.write_status(status)
+    if error:
+        writer.write_error(error)
+
+
+def _read_status(cell: CellPaths) -> CaseStatus | None:
+    """Best-effort read of one cell's ``status`` file."""
+    try:
+        text = cell.status_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    try:
+        return CaseStatus(text)
+    except ValueError:
+        return None
+
+
+def _completed_keys(run_dir: Path) -> set[tuple[str, str, int]]:
+    """Keys for cells whose ``status`` file reads ``completed``.
+
+    Per-cell status is the source of truth: it lands as soon as a case
+    settles, so a cancelled run that never wrote ``summary.json`` does not
+    lose finished cells from the skip set.
+    """
+    return {
+        (cell.case_id, cell.model, cell.seed)
+        for cell in iter_cell_paths(run_dir)
+        if _read_status(cell) is CaseStatus.completed
+    }
+
+
+def _load_case_summaries(run_dir: Path) -> list[CaseSummary]:
+    """Reconstruct ``CaseSummary`` entries from per-cell artifacts on disk."""
+    summaries: list[CaseSummary] = []
+    for cell in iter_cell_paths(run_dir):
+        status = _read_status(cell)
+        if status is None:
+            continue
+        metrics = read_json_or(cell.metrics_path, {})
+        error = (
+            cell.error_path.read_text(encoding="utf-8").strip() or None
+            if cell.error_path.exists() else None
+        )
+        summaries.append(CaseSummary(
+            case_id=cell.case_id, model=cell.model, seed=cell.seed, status=status,
+            cost_usd=float(metrics.get("cost_usd") or 0.0),
+            artifact_dir=str(cell.cell_dir.relative_to(cell.run_dir)),
+            error=error,
+        ))
+    return summaries
+
+
+def _write_record(run_dir: Path, record: RunRecord) -> None:
+    write_json(run_dir / "run.json", record.model_dump(mode="json"))
+
+
+async def _soft(label: str, fn: Callable[[], Awaitable[T]], default: T) -> T:
+    """Run ``fn``; on BrowserError log a warning and return ``default``."""
+    try:
+        return await fn()
+    except BrowserError as exc:
+        logger.warning("%s failed: %s", label, exc)
+        return default
+
+
+# --- main entrypoint ------------------------------------------------------
 
 async def run_matrix(
     eval_set: EvalSet,
@@ -112,17 +174,17 @@ async def run_matrix(
     settings: Settings,
     *,
     run_id: str | None = None,
+    overwrite: bool = False,
 ) -> RunSummary:
     """Execute the planned matrix and return a :class:`RunSummary`."""
-
     started_at = datetime.now(UTC)
     rid = run_id or make_run_id(config.eval_set_id, config.run_label, now=started_at)
     run_dir = settings.results_dir / rid
     reuse_existing = run_id is not None and run_dir.is_dir()
     run_dir.mkdir(parents=True, exist_ok=True)
-
     if reuse_existing:
         logger.info("reusing existing run dir %s", run_dir)
+
     record = RunRecord(
         run_id=rid,
         eval_set=eval_set.spec.id,
@@ -134,26 +196,49 @@ async def run_matrix(
             "pm_agent_url": settings.pm_agent_url,
         },
     )
-    _write_run_json(run_dir, record)
+    _write_record(run_dir, record)
 
     matrix = build_manifest(eval_set, config)
+    if reuse_existing and not overwrite:
+        already_done = _completed_keys(run_dir)
+        if already_done:
+            kept = [e for e in matrix if (e.case.id, e.model, e.seed) not in already_done]
+            if len(kept) < len(matrix):
+                logger.info(
+                    "skipping %d already-completed entries; pass --overwrite to re-run",
+                    len(matrix) - len(kept),
+                )
+            matrix = kept
     write_manifest(matrix, run_dir / "manifest.json")
     logger.info("planned %d matrix entries for run %s", len(matrix), rid)
 
     budget = Budget(max_cost_usd=config.max_cost_usd, journal_path=run_dir / "cost.json")
-
-    case_summaries: list[CaseSummary] = []
-    aborted = False
-
     by_model: dict[str, list[MatrixEntry]] = {}
     for entry in matrix:
         by_model.setdefault(entry.model, []).append(entry)
 
-    # Late import: keeps playwright off the import path for unit tests
-    # that exercise the runner manifest without a browser.
+    # Late import keeps playwright off the import path for unit tests that
+    # exercise the runner manifest without a browser.
     from pmai_evals.browser.session import PMBrowser
 
+    aborted = False
+
+    def write_summary() -> RunSummary:
+        cases = _load_case_summaries(run_dir)
+        snapshot = RunSummary(
+            run_id=rid,
+            eval_set=eval_set.spec.id,
+            started_at=started_at,
+            finished_at=datetime.now(UTC),
+            cases=cases,
+            total_cost_usd=sum(c.cost_usd for c in cases),
+            aborted_over_budget=aborted,
+        )
+        write_json(run_dir / "summary.json", snapshot.model_dump(mode="json"))
+        return snapshot
+
     for model, entries in by_model.items():
+        attempted: set[tuple[str, int]] = set()
         try:
             async with PMBrowser(settings) as browser:
                 await browser.ensure_authenticated()
@@ -163,30 +248,26 @@ async def run_matrix(
                     except BudgetExceededError:
                         logger.warning("budget exceeded; skipping remaining cases")
                         aborted = True
-                        case_summaries.append(
-                            _failure_summary(entry, CaseStatus.skipped_over_budget)
-                        )
+                        _record_failure(run_dir, entry, CaseStatus.skipped_over_budget)
+                        write_summary()
                         continue
-
-                    summary = await _run_one(
-                        browser=browser,
-                        entry=entry,
-                        eval_set=eval_set,
-                        run_dir=run_dir,
-                        budget=budget,
-                        settings=settings,
+                    await _run_one(
+                        browser=browser, entry=entry, eval_set=eval_set,
+                        run_dir=run_dir, budget=budget, settings=settings,
                     )
-                    case_summaries.append(summary)
+                    attempted.add((entry.case.id, entry.seed))
+                    write_summary()
                 if aborted:
                     break
         except BrowserError as exc:
             logger.error("browser error for model %s: %s", model, exc)
-            attempted = {(s.case_id, s.seed) for s in case_summaries if s.model == model}
             for entry in entries:
-                if (entry.case.id, entry.seed) not in attempted:
-                    case_summaries.append(
-                        _failure_summary(entry, CaseStatus.failed, error=f"BrowserError: {exc}")
-                    )
+                if (entry.case.id, entry.seed) in attempted:
+                    continue
+                _record_failure(
+                    run_dir, entry, CaseStatus.failed, f"BrowserError: {exc}",
+                )
+            write_summary()
         except (BudgetExceededError, PMAIEvalsError):
             raise
         except OSError as exc:
@@ -196,60 +277,27 @@ async def run_matrix(
 
     finished_at = datetime.now(UTC)
     record = record.model_copy(update={"finished_at": finished_at})
-    _write_run_json(run_dir, record)
-
-    merged_cases = (
-        _merge_case_summaries(run_dir / "summary.json", case_summaries)
-        if reuse_existing
-        else case_summaries
-    )
-    summary = RunSummary(
-        run_id=rid,
-        eval_set=eval_set.spec.id,
-        started_at=started_at,
-        finished_at=finished_at,
-        cases=merged_cases,
-        total_cost_usd=sum(c.cost_usd for c in merged_cases),
-        aborted_over_budget=aborted,
-    )
-    _write_summary(run_dir, summary)
-    return summary
+    _write_record(run_dir, record)
+    return write_summary()
 
 
-def _merge_case_summaries(
-    summary_path: Path, fresh: list[CaseSummary]
-) -> list[CaseSummary]:
-    """Replace existing per-(case, model, seed) entries with fresh ones."""
-    if not summary_path.is_file():
-        return fresh
-    try:
-        existing = RunSummary.model_validate_json(summary_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        logger.warning("could not parse existing summary.json (%s); writing fresh", exc)
-        return fresh
-    fresh_keys = {(c.case_id, c.model, c.seed) for c in fresh}
-    kept = [c for c in existing.cases if (c.case_id, c.model, c.seed) not in fresh_keys]
-    return kept + list(fresh)
-
-
-# --- per-case ---------------------------------------------------------------
+# --- per-case -------------------------------------------------------------
 
 async def _preload_scenario(
-    page: object,  # playwright Page, untyped to keep the import out of module load
+    page: object,
     preload: PreloadSpec,
     eval_set: EvalSet,
     *,
     project: str,
     frontend_url: str,
 ) -> None:
-    """Materialize scenario state before the prompt is sent."""
     if preload.project.files:
-        local_paths = [eval_set.fixture_path(name) for name in preload.project.files]
         await upload_to_project(
-            page, local_paths,  # type: ignore[arg-type]
-            project=project, frontend_url=frontend_url,
+            page,  # type: ignore[arg-type]
+            [eval_set.fixture_path(name) for name in preload.project.files],
+            project=project,
+            frontend_url=frontend_url,
         )
-
     for pdb_id in preload.viewer.pdb_ids:
         await load_pdb_id(page, pdb_id)  # type: ignore[arg-type]
     for name in preload.viewer.files:
@@ -258,7 +306,7 @@ async def _preload_scenario(
 
 async def _run_one(
     *,
-    browser: object,  # PMBrowser, untyped to avoid the cyclic import at module load
+    browser: object,  # PMBrowser; untyped to keep the cyclic import out of module load
     entry: MatrixEntry,
     eval_set: EvalSet,
     run_dir: Path,
@@ -274,9 +322,7 @@ async def _run_one(
     logger.info("starting %s", entry.label)
 
     try:
-        chat = await browser.new_chat(  # type: ignore[attr-defined]
-            model=entry.model
-        )
+        chat = await browser.new_chat(model=entry.model)  # type: ignore[attr-defined]
         try:
             await clear_project(
                 chat.page,
@@ -293,34 +339,17 @@ async def _run_one(
             status_str = await chat.wait_for_completion(timeout_s=timeout_s)
             chat_id = chat.chat_id
 
-            try:
-                history = await chat.fetch_history()
-            except BrowserError as exc:
-                logger.warning("chat history fetch failed: %s", exc)
-                history = []
-
-            try:
-                viewer_state = await chat.get_viewer_state()
-            except BrowserError as exc:
-                logger.warning("viewer state fetch failed: %s", exc)
-                viewer_state = {"_error": str(exc)}
-
-            try:
-                viewer_selection = await chat.get_viewer_selection()
-            except BrowserError as exc:
-                logger.warning("viewer selection fetch failed: %s", exc)
-                viewer_selection = {"_error": str(exc)}
-
-            try:
-                await chat.save_screenshot(writer.screenshot_path)
-            except BrowserError as exc:
-                logger.warning("screenshot failed: %s", exc)
-
-            try:
-                final_answer = await chat.get_final_answer()
-            except BrowserError as exc:
-                logger.warning("final answer fetch failed: %s", exc)
-                final_answer = ""
+            history = await _soft("chat history fetch", chat.fetch_history, [])
+            viewer_state = await _soft(
+                "viewer state fetch", chat.get_viewer_state, {"_error": "fetch failed"}
+            )
+            viewer_selection = await _soft(
+                "viewer selection fetch", chat.get_viewer_selection, {"_error": "fetch failed"}
+            )
+            await _soft(
+                "screenshot", lambda: chat.save_screenshot(writer.screenshot_path), None
+            )
+            final_answer = await _soft("final answer fetch", chat.get_final_answer, "")
 
             try:
                 if await list_system_names(chat.page):
@@ -350,19 +379,17 @@ async def _run_one(
             output_tokens=trace.usage.output_tokens,
             cached_tokens=trace.usage.cached_tokens,
         )
-        writer.write_metrics(
-            {
-                "input_tokens": trace.usage.input_tokens,
-                "output_tokens": trace.usage.output_tokens,
-                "cached_tokens": trace.usage.cached_tokens,
-                "reasoning_tokens": trace.usage.reasoning_tokens,
-                "ttft_ms": trace.metrics.ttft_ms,
-                "total_ms": trace.metrics.total_ms,
-                "tool_latency_ms": trace.metrics.tool_latency_ms,
-                "cost_usd": cost,
-                "trace_status": str(trace.status),
-            }
-        )
+        writer.write_metrics({
+            "input_tokens": trace.usage.input_tokens,
+            "output_tokens": trace.usage.output_tokens,
+            "cached_tokens": trace.usage.cached_tokens,
+            "reasoning_tokens": trace.usage.reasoning_tokens,
+            "ttft_ms": trace.metrics.ttft_ms,
+            "total_ms": trace.metrics.total_ms,
+            "tool_latency_ms": trace.metrics.tool_latency_ms,
+            "cost_usd": cost,
+            "trace_status": str(trace.status),
+        })
         budget.charge(
             case_id=case.id,
             model=entry.model,

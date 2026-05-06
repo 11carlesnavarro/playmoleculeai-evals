@@ -1,14 +1,15 @@
-"""ChatSession — one prompt, one rollout, one set of artifacts.
+"""ChatSession: one prompt, one rollout, one set of artifacts.
 
 Single-use. After ``wait_for_completion``, fetch the artifacts you need
-(screenshot, viewer state, final answer, history), then close. Sending a
-second prompt through the same session is forbidden — open a fresh
+and ``close()``. Sending a second prompt is forbidden, open a fresh
 ``ChatSession`` instead.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import logging
 from enum import StrEnum
 from pathlib import Path
@@ -21,6 +22,7 @@ from pmai_evals.browser.observers import (
     VIEWER_SELECTION_JSON,
     VIEWER_STATE_JSON,
 )
+from pmai_evals.browser.project_files import authed_fetch
 from pmai_evals.config import Settings
 from pmai_evals.errors import BrowserError, ChatTimeoutError, TraceParseError
 
@@ -39,20 +41,12 @@ class CompletionStatus(StrEnum):
 class ChatSession:
     """One Page, one chat. Single-use."""
 
-    def __init__(
-        self,
-        *,
-        page: Page,
-        model: str,
-        settings: Settings,
-    ) -> None:
+    def __init__(self, *, page: Page, model: str, settings: Settings) -> None:
         self._page = page
         self._model = model
         self._settings = settings
         self._chat_id: str = ""
         self._closed = False
-
-    # ---- properties -----------------------------------------------------
 
     @property
     def chat_id(self) -> str:
@@ -67,22 +61,19 @@ class ChatSession:
     async def prepare(self) -> None:
         """Wait for the page's Pyodide worker and Molstar viewer to be live.
 
-        We don't fail hard if Pyodide isn't ready inside the probe window —
-        some pages defer the worker until first use. The runner observes
-        viewer state lazily and treats absence as a recoverable warning.
+        Best-effort: poll for ~10s but don't crash if Pyodide isn't ready.
+        Some pages defer the worker until first use; the runner handles
+        absence as a recoverable warning.
         """
-
         try:
             await self._page.wait_for_load_state("domcontentloaded")
         except Exception as exc:
             raise BrowserError(f"page failed to load: {exc}") from exc
 
-        # Best-effort: poll for Pyodide for ~10s, but don't crash if absent.
         for _ in range(20):
             try:
-                ready = await self._page.evaluate(PYODIDE_READY)
-                if ready:
-                    break
+                if await self._page.evaluate(PYODIDE_READY):
+                    return
             except Exception:
                 pass
             await asyncio.sleep(0.5)
@@ -94,24 +85,18 @@ class ChatSession:
             locators.SETTINGS_DIALOG[0], name=locators.SETTINGS_DIALOG[1]
         )
         try:
-            await page.get_by_label(
-                locators.SETTINGS_BUTTON_LABEL, exact=True
-            ).click()
+            await page.get_by_label(locators.SETTINGS_BUTTON_LABEL, exact=True).click()
             await dialog.wait_for()
             await page.get_by_role(
                 locators.MODEL_SELECT[0], name=locators.MODEL_SELECT[1]
             ).click()
             target = page.get_by_role("option", name=self._model, exact=True)
             if await target.count() == 0:
-                # Enumerate only on the failure path so the error message
-                # can name every option pmview actually offers.
                 available = [
-                    t.strip()
-                    for t in await page.get_by_role("option").all_inner_texts()
+                    t.strip() for t in await page.get_by_role("option").all_inner_texts()
                 ]
                 raise BrowserError(
-                    f"model {self._model!r} not offered by pmview; "
-                    f"available: {available}"
+                    f"model {self._model!r} not offered by pmview; available: {available}"
                 )
             await target.click()
             await page.keyboard.press("Escape")
@@ -125,12 +110,8 @@ class ChatSession:
         """Fill the prompt box, submit, and capture the chat_id.
 
         The ``x-chat-id`` response header on ``POST /v3/agent/chat/rollout``
-        is the server's authoritative handle for the chat being created.
-        We mirror what the frontend's ``sendMessage.ts`` does: wrap the
-        Enter keystroke in ``expect_response`` and read the header the
-        moment it arrives.
+        is the server's authoritative handle for the chat.
         """
-
         try:
             box = self._page.get_by_role(
                 locators.PROMPT_INPUT[0], name=locators.PROMPT_INPUT[1]
@@ -151,7 +132,6 @@ class ChatSession:
             )
         self._chat_id = chat_id
 
-        # Guard against stale cookie / picker drift sending the wrong model.
         body = resp.request.post_data_json
         if not isinstance(body, dict):
             raise BrowserError(f"rollout request body unreadable: {body!r}")
@@ -161,17 +141,13 @@ class ChatSession:
                 f"rollout used model {sent!r}, expected {self._model!r}"
             )
 
-    async def wait_for_completion(
-        self, *, timeout_s: int | None
-    ) -> CompletionStatus:
+    async def wait_for_completion(self, *, timeout_s: int | None) -> CompletionStatus:
         """Block until the run finishes or times out.
 
         Primary signal: the ``Regenerate`` button becomes enabled. The
         playmolecule frontend re-enables it once the model has finished
-        streaming and any pmview tool calls have settled. ``timeout_s=None``
-        waits indefinitely (Playwright's ``timeout=0`` convention).
+        streaming and any pmview tool calls have settled.
         """
-
         from playwright.async_api import TimeoutError as PWTimeout
 
         regenerate = self._page.get_by_role(
@@ -202,14 +178,18 @@ class ChatSession:
     # ---- observers ------------------------------------------------------
 
     async def fetch_history(self) -> list[dict[str, Any]]:
-        """Return the full chat history from ``GET /v3/agent/chat/{id}``.
-
-        Call after ``send_prompt`` so ``chat_id`` is set.
-        """
-
+        """Return the full chat history from ``GET /v3/agent/chat/{id}``."""
         if not self._chat_id:
             raise BrowserError("chat_id is empty; call send_prompt first")
-        resp = await self._chat_api_request("GET")
+
+        url = f"{self._settings.pm_frontend_url}/v3/agent/chat/{self._chat_id}?full=true"
+        try:
+            resp = await authed_fetch(
+                self._page, self._settings.pm_frontend_url, url, method="GET"
+            )
+        except Exception as exc:
+            raise BrowserError(f"GET {url} failed: {exc}") from exc
+
         if not resp.ok:
             body = ""
             try:
@@ -229,28 +209,11 @@ class ChatSession:
             )
         return data
 
-    async def _chat_api_request(self, method: str) -> Any:
-        """Call ``/v3/agent/chat/{chat_uid}`` with CSRF + auth-refresh handling."""
-        from pmai_evals.browser.project_files import authed_fetch
-        url = f"{self._settings.pm_frontend_url}/v3/agent/chat/{self._chat_id}?full=true"
-        try:
-            return await authed_fetch(
-                self._page, self._settings.pm_frontend_url, url, method=method,
-            )
-        except Exception as exc:
-            raise BrowserError(f"{method} {url} failed: {exc}") from exc
-
     async def get_viewer_state(self) -> dict[str, Any]:
-        """Return the in-page systems_tree as a Python dict."""
         return await self._eval_pyodide_json(VIEWER_STATE_JSON, "viewer state")
 
     async def get_viewer_selection(self) -> dict[str, Any]:
-        """Return the user selection as ``{moleculeID: "index ..."}``.
-
-        Empty dict if no selection has been made via ``mol.viewer_select``.
-        The selection string is a moleculekit atomselect expression of
-        source indices and can be passed straight to ``mol.atomselect``.
-        """
+        """Return ``{moleculeID: "index ..."}`` (atomselect string), or {}."""
         return await self._eval_pyodide_json(VIEWER_SELECTION_JSON, "viewer selection")
 
     async def _eval_pyodide_json(self, observer: str, label: str) -> dict[str, Any]:
@@ -262,8 +225,6 @@ class ChatSession:
             return {}
         if isinstance(raw, str):
             try:
-                import json
-
                 return json.loads(raw)
             except ValueError:
                 return {"_raw": raw}
@@ -272,42 +233,28 @@ class ChatSession:
         return {"_raw": str(raw)}
 
     async def save_screenshot(self, path: Path) -> None:
-        """Save a Molstar viewport screenshot to ``path``.
-
-        Falls back to a full-page screenshot if Molstar's helper isn't
-        available — better than nothing for the LLM judge.
-        """
-
+        """Save a Molstar viewport screenshot, falling back to the full page."""
         try:
             data_uri = await self._page.evaluate(SCREENSHOT_DATA_URI)
         except Exception as exc:
             raise BrowserError(f"screenshot eval failed: {exc}") from exc
 
+        path.parent.mkdir(parents=True, exist_ok=True)
         if isinstance(data_uri, str) and data_uri.startswith("data:image"):
-            import base64
-
             try:
                 _, b64 = data_uri.split(",", 1)
             except ValueError as exc:
                 raise BrowserError("malformed data URI from Molstar") from exc
-            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(base64.b64decode(b64))
             return
-
-        # Fallback: full-page screenshot via Playwright.
-        path.parent.mkdir(parents=True, exist_ok=True)
         await self._page.screenshot(path=str(path), full_page=True)
 
     async def get_final_answer(self) -> str:
-        """Pull the last assistant message from the DOM as plain text.
-
-        The trace DB is the canonical source — this is a courtesy fallback
-        for when the trace lookup hasn't happened yet (e.g. for live
-        debugging).
-        """
-
+        """Pull the last assistant message from the DOM as plain text."""
         try:
-            handles = await self._page.locator("[data-role='assistant'], .assistant-message").all()
+            handles = await self._page.locator(
+                "[data-role='assistant'], .assistant-message"
+            ).all()
             if not handles:
                 return ""
             return (await handles[-1].inner_text()) or ""

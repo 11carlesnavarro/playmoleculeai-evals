@@ -5,10 +5,9 @@ with deterministic assertions *and* rubric-based LLM-as-judge grading.
 
 Docs live in [`docs/`](docs/):
 
-- [`how-it-works.md`](docs/how-it-works.md) — pipeline tour. Start here.
-- [`writing-evals.md`](docs/writing-evals.md) — authoring guide for new cases and eval sets.
-- [`SPEC.md`](docs/SPEC.md) — what the harness must do and the shape of its outputs.
-- [`plan.md`](docs/plan.md) — roadmap and architectural reasoning.
+- [`how-it-works.md`](docs/how-it-works.md): pipeline tour. Start here.
+- [`writing-evals.md`](docs/writing-evals.md): authoring guide for new cases and eval sets.
+- [`SPEC.md`](docs/SPEC.md): what the harness must do and the shape of its outputs.
 
 ## Install
 

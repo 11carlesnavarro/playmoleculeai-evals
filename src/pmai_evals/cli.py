@@ -1,12 +1,12 @@
-"""Typer CLI: ``pmai-evals {setup-auth,run,grade,report,critique}``.
+"""Typer CLI: ``pmai-evals {setup-auth,run,grade,report,critique,list-models}``.
 
 Thin wrappers around library functions. No business logic in this file.
 
 Exit codes:
-    0 — success
-    1 — user error (bad args, missing eval set, ...)
-    2 — budget abort
-    3 — unrecoverable harness error
+    0 success
+    1 user error (bad args, missing eval set, ...)
+    2 budget abort
+    3 unrecoverable harness error
 """
 
 from __future__ import annotations
@@ -45,19 +45,28 @@ app = typer.Typer(
 console = Console()
 
 
-def _configure_logging(level: str) -> None:
+def _settings() -> Settings:
+    s = Settings()
     logging.basicConfig(
-        level=level.upper(),
+        level=s.pmai_evals_log_level.upper(),
         format="%(message)s",
         datefmt="[%X]",
         handlers=[RichHandler(console=console, rich_tracebacks=True, show_path=False)],
     )
-
-
-def _settings() -> Settings:
-    s = Settings()
-    _configure_logging(s.pmai_evals_log_level)
     return s
+
+
+def _resolve_models(explicit: str) -> list[str]:
+    known = {m.id for m in load_registry().models}
+    chosen = [m.strip() for m in explicit.split(",") if m.strip()]
+    if not chosen:
+        raise typer.BadParameter("--models must list at least one model id")
+    unknown = [m for m in chosen if m not in known]
+    if unknown:
+        raise typer.BadParameter(
+            f"unknown model id(s): {unknown}; known: {sorted(known)}"
+        )
+    return chosen
 
 
 # --- setup-auth -----------------------------------------------------------
@@ -83,28 +92,13 @@ def setup_auth() -> None:
 
 # --- run ------------------------------------------------------------------
 
-def _resolve_models(explicit: str) -> list[str]:
-    registry = load_registry()
-    known = {m.id for m in registry.models}
-    chosen = [m.strip() for m in explicit.split(",") if m.strip()]
-    if not chosen:
-        raise typer.BadParameter("--models must list at least one model id")
-    unknown = [m for m in chosen if m not in known]
-    if unknown:
-        raise typer.BadParameter(
-            f"unknown model id(s): {unknown}; known: {sorted(known)}"
-        )
-    return chosen
-
-
 @app.command()
 def run(
     eval_set: Annotated[str, typer.Option("--eval-set", "-e", help="Eval set id")],
     models: Annotated[
         str,
         typer.Option(
-            "--models",
-            "-m",
+            "--models", "-m",
             help="Comma-separated model ids from the registry (`pmai-evals list-models`)",
         ),
     ],
@@ -123,30 +117,36 @@ def run(
         str | None,
         typer.Option(
             "--run-id",
-            help="Reuse an existing run dir; new case results merge into its summary by (case_id, model, seed). Ignores --label.",
+            help="Reuse an existing run dir; only missing or non-completed "
+                 "(case_id, model, seed) cells are executed and merged into "
+                 "its summary. Ignores --label. Pass --overwrite to re-run all.",
         ),
     ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            help="With --run-id, re-execute every planned cell even if it "
+                 "already completed (default skips already-completed cells).",
+        ),
+    ] = False,
     judge_model: Annotated[
         str | None, typer.Option("--judge-model", help="Override judge model")
     ] = None,
     dry_run: Annotated[
-        bool,
-        typer.Option("--dry-run", help="Print manifest, do not execute"),
+        bool, typer.Option("--dry-run", help="Print manifest, do not execute")
     ] = False,
     auto_grade: Annotated[
-        bool,
-        typer.Option("--auto-grade", help="Grade the run when execution finishes"),
+        bool, typer.Option("--auto-grade", help="Grade after run finishes")
     ] = False,
     auto_report: Annotated[
         bool,
         typer.Option(
-            "--auto-report",
-            help="Render a markdown report after grading. Implies --auto-grade.",
+            "--auto-report", help="Render markdown after grading. Implies --auto-grade.",
         ),
     ] = False,
 ) -> None:
     """Run the (case × model × seed) matrix."""
-
     settings = _settings()
 
     try:
@@ -165,8 +165,6 @@ def run(
         run_label=label,
         judge_model=judge_model or settings.pmai_evals_judge_model,
     )
-
-    # Headless override.
     if headless != settings.pmai_evals_headless:
         settings = settings.model_copy(update={"pmai_evals_headless": headless})
 
@@ -178,7 +176,9 @@ def run(
         return
 
     try:
-        summary = asyncio.run(run_matrix(es, config, settings, run_id=run_id))
+        summary = asyncio.run(
+            run_matrix(es, config, settings, run_id=run_id, overwrite=overwrite)
+        )
     except BudgetExceededError as exc:
         console.print(f"[yellow]budget abort:[/yellow] {exc}")
         raise typer.Exit(code=2) from exc
@@ -218,8 +218,7 @@ def _grade_run(
 
     try:
         written = grade_run_sync(
-            run_id,
-            settings,
+            run_id, settings,
             judge_model=judge_model,
             rubric_override=rubric_override,
             force=force,
@@ -246,15 +245,15 @@ def grade(
 ) -> None:
     """Grade an existing run. Re-runnable."""
     _grade_run(
-        run_id,
-        _settings(),
-        judge_model=judge_model,
-        force=force,
-        rubric_override=rubric,
+        run_id, _settings(),
+        judge_model=judge_model, force=force, rubric_override=rubric,
     )
 
 
 # --- report ---------------------------------------------------------------
+
+_RENDERERS = {"markdown": render_markdown, "html": render_html, "json": render_json}
+
 
 def _render_report(
     run_id: str,
@@ -263,18 +262,15 @@ def _render_report(
     fmt: str,
     out: Path | None,
 ) -> None:
+    if fmt not in _RENDERERS:
+        console.print(f"[red]unknown format:[/red] {fmt}")
+        raise typer.Exit(code=1)
     run_dir = settings.results_dir / run_id
     if not run_dir.is_dir():
         console.print(f"[red]run not found:[/red] {run_dir}")
         raise typer.Exit(code=1)
 
-    benchmark = aggregate_run(run_dir)
-    renderers = {"markdown": render_markdown, "html": render_html, "json": render_json}
-    if fmt not in renderers:
-        console.print(f"[red]unknown format:[/red] {fmt}")
-        raise typer.Exit(code=1)
-    body = renderers[fmt](benchmark)
-
+    body = _RENDERERS[fmt](aggregate_run(run_dir))
     if out is not None:
         out.write_text(body, encoding="utf-8")
         console.print(f"[green]wrote {out}[/green]")
@@ -285,13 +281,9 @@ def _render_report(
 @app.command()
 def report(
     run_id: Annotated[str, typer.Argument()],
-    fmt: Annotated[
-        str,
-        typer.Option("--format", "-f", help="markdown | html | json"),
-    ] = "markdown",
+    fmt: Annotated[str, typer.Option("--format", "-f", help="markdown | html | json")] = "markdown",
     out: Annotated[
-        Path | None,
-        typer.Option("--out", help="Write to file instead of stdout"),
+        Path | None, typer.Option("--out", help="Write to file instead of stdout")
     ] = None,
 ) -> None:
     """Render a benchmark report from a graded run."""
@@ -306,9 +298,8 @@ def critique(run_id: Annotated[str, typer.Argument()]) -> None:
     from pmai_evals.grading.critique import critique_run
 
     settings = _settings()
-    run_dir = settings.results_dir / run_id
     try:
-        result = critique_run(run_dir)
+        result = critique_run(settings.results_dir / run_id)
     except PMAIEvalsError as exc:
         console.print(f"[red]critique error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
@@ -324,8 +315,7 @@ def critique(run_id: Annotated[str, typer.Argument()]) -> None:
 @app.command(name="list-models")
 def list_models() -> None:
     """Print the model registry."""
-    registry = load_registry()
-    payload = [m.model_dump() for m in registry.models]
+    payload = [m.model_dump() for m in load_registry().models]
     console.print(json.dumps(payload, indent=2))
 
 

@@ -1,6 +1,6 @@
 """Read/write artifacts for one (case × model × seed) cell.
 
-Layout (spec §4.4):
+Layout:
 
     runs/<run_id>/<case_id>/<model>/seed-<N>/
         trace.json
@@ -8,18 +8,16 @@ Layout (spec §4.4):
         viewer_state.json
         viewer_selection.json
         screenshot.png
-        dom_snapshot.html        (optional)
         metrics.json
-        grade.json               (written by grade stage; absent until then)
-        status                   (one-line plain text)
+        grade.json    (written by grade stage; absent until then)
+        status        (one-line plain text)
 
-Write-once. The runner never overwrites a completed cell — re-runs go to a
+Write-once. The runner never overwrites a completed cell, re-runs go to a
 fresh ``run_id``.
 """
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -32,7 +30,7 @@ from pmai_evals.trace.schemas import Trace
 
 
 @dataclass
-class _CellPaths:
+class CellPaths:
     """Address of one (case × model × seed) cell on disk.
 
     All path properties live here so :class:`RunArtifact` (read) and
@@ -69,10 +67,6 @@ class _CellPaths:
         return self.cell_dir / "screenshot.png"
 
     @property
-    def dom_snapshot_path(self) -> Path:
-        return self.cell_dir / "dom_snapshot.html"
-
-    @property
     def metrics_path(self) -> Path:
         return self.cell_dir / "metrics.json"
 
@@ -96,7 +90,7 @@ class _CellPaths:
 # --- writer ---------------------------------------------------------------
 
 @dataclass
-class RunArtifactWriter(_CellPaths):
+class RunArtifactWriter(CellPaths):
     """Writer for one cell. Constructed by the executor per case/model/seed."""
 
     def ensure_dir(self) -> None:
@@ -129,10 +123,6 @@ class RunArtifactWriter(_CellPaths):
         self.cell_dir.mkdir(parents=True, exist_ok=True)
         self.error_path.write_text(message + "\n", encoding="utf-8")
 
-    def attach_screenshot(self, src: Path) -> None:
-        self.cell_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(src, self.screenshot_path)
-
     def write_grade(self, grade: CaseGrade) -> None:
         write_json(self.grade_path, grade.model_dump(mode="json"))
 
@@ -140,13 +130,11 @@ class RunArtifactWriter(_CellPaths):
 # --- reader ---------------------------------------------------------------
 
 @dataclass
-class RunArtifact(_CellPaths):
+class RunArtifact(CellPaths):
     """Read-only view over one cell on disk. Passed to assertions and judges.
 
-    Per-cell loaders are memoized: a single ``RunArtifact`` instance reads
-    each artifact at most once. Assertions and the judge both call into
-    ``trace()`` / ``final_answer()`` / ``viewer_state()`` repeatedly, so
-    memoization saves significant JSON decoding on every grade pass.
+    Per-cell loaders are memoized so each artifact is read at most once
+    per :class:`RunArtifact` instance.
     """
 
     _loaded_systems: dict[str, Any] = field(
@@ -159,12 +147,10 @@ class RunArtifact(_CellPaths):
 
     @cached_property
     def _viewer_state(self) -> Any:
-        """Pyodide systems_tree as parsed JSON — typically a list of dicts."""
         return read_json_or(self.viewer_state_path, {})
 
     @cached_property
     def _viewer_selection(self) -> Any:
-        """User selection as ``{moleculeID: "index ..."}``, or ``{}`` if none."""
         return read_json_or(self.viewer_selection_path, {})
 
     @cached_property
@@ -173,9 +159,10 @@ class RunArtifact(_CellPaths):
 
     @cached_property
     def _final_answer(self) -> str:
-        if not self.final_answer_path.exists():
-            return ""
-        return self.final_answer_path.read_text(encoding="utf-8")
+        return (
+            self.final_answer_path.read_text(encoding="utf-8")
+            if self.final_answer_path.exists() else ""
+        )
 
     def trace(self) -> dict[str, Any]:
         return self._trace
@@ -206,12 +193,7 @@ class RunArtifact(_CellPaths):
 
     @cached_property
     def _systems_export_dir(self) -> Path | None:
-        """Path to the extracted ``pmv_*`` directory inside ``systems/``.
-
-        ``export_viewer_state`` writes exactly one ``pmv_<timestamp>.zip``
-        per case and unzips it next to itself. We pick the extracted
-        directory (not the zip) because every reader wants files.
-        """
+        """Path to the extracted ``pmv_*`` directory inside ``systems/``."""
         if not self.systems_dir.is_dir():
             return None
         for child in sorted(self.systems_dir.iterdir()):
@@ -226,31 +208,20 @@ class RunArtifact(_CellPaths):
         root = self._systems_export_dir
         if root is None:
             return []
-        out: list[tuple[str, Path]] = []
-        for path in sorted(root.rglob("*")):
-            if not path.is_file() or path.name == "config.pmv":
-                continue
-            logical = strip_export_prefix(path.stem)
-            out.append((logical, path))
-        return out
+        return [
+            (strip_export_prefix(path.stem), path)
+            for path in sorted(root.rglob("*"))
+            if path.is_file() and path.name != "config.pmv"
+        ]
 
     def system_files(self) -> list[tuple[str, Path]]:
-        """Return ``(logical_name, path)`` for each exported structure file.
-
-        Logical name is the pmview system name (prefix stripped, extension
-        dropped). Empty list if no export was captured for this cell.
-        """
+        """``(logical_name, path)`` per exported structure; [] if none."""
         return self._system_files
 
     def load_system(self, name: str) -> Any:
-        """Return a moleculekit ``Molecule`` for the named system.
-
-        ``name`` is matched case-insensitively against the logical names
-        returned by :meth:`system_files`. Raises ``KeyError`` if not found.
-        Callers that want soft failure should check ``system_files()`` first.
-        """
-        cache = self._loaded_systems
+        """Moleculekit ``Molecule`` for the named system. Raises ``KeyError``."""
         key = name.lower()
+        cache = self._loaded_systems
         if key in cache:
             return cache[key]
         for logical, path in self._system_files:
@@ -261,30 +232,28 @@ class RunArtifact(_CellPaths):
                 cache[key] = mol
                 return mol
         available = [n for n, _ in self._system_files]
-        raise KeyError(
-            f"system {name!r} not in export; available: {available}"
-        )
+        raise KeyError(f"system {name!r} not in export; available: {available}")
 
 
 # --- discovery ------------------------------------------------------------
 
-def _cell_from_dir(run_dir: Path, cell_dir: Path) -> _CellPaths | None:
-    seed_part = cell_dir.name
-    model = cell_dir.parent.name
-    case_id = cell_dir.parent.parent.name
+def _cell_from_dir(run_dir: Path, cell_dir: Path) -> CellPaths | None:
     try:
-        seed = int(seed_part.split("-", 1)[1])
+        seed = int(cell_dir.name.split("-", 1)[1])
     except (IndexError, ValueError):
         return None
-    return _CellPaths(run_dir=run_dir, case_id=case_id, model=model, seed=seed)
+    return CellPaths(
+        run_dir=run_dir,
+        case_id=cell_dir.parent.parent.name,
+        model=cell_dir.parent.name,
+        seed=seed,
+    )
 
 
-def iter_cell_paths(run_dir: Path) -> Iterator[_CellPaths]:
-    """Yield one ``_CellPaths`` per cell directory under ``run_dir``.
+def iter_cell_paths(run_dir: Path) -> Iterator[CellPaths]:
+    """Yield one ``CellPaths`` per cell directory under ``run_dir``.
 
-    A cell is identified by its ``status`` file — what the runner writes
-    last, the canonical "cell exists" marker. Use this for run-stage
-    discovery.
+    A cell is identified by its ``status`` file (what the runner writes last).
     """
     for status_file in run_dir.glob("*/*/seed-*/status"):
         cell = _cell_from_dir(run_dir, status_file.parent)
@@ -292,12 +261,8 @@ def iter_cell_paths(run_dir: Path) -> Iterator[_CellPaths]:
             yield cell
 
 
-def iter_grade_files(run_dir: Path) -> Iterator[tuple[_CellPaths, dict[str, Any]]]:
-    """Yield ``(cell, grade.json)`` pairs by globbing grade files directly.
-
-    Independent of the status-file convention so grading-only tests and
-    re-grading flows do not need to fake runner state.
-    """
+def iter_grade_files(run_dir: Path) -> Iterator[tuple[CellPaths, dict[str, Any]]]:
+    """Yield ``(cell, grade.json)`` pairs by globbing grade files directly."""
     for grade_file in run_dir.glob("*/*/seed-*/grade.json"):
         cell = _cell_from_dir(run_dir, grade_file.parent)
         if cell is not None:
