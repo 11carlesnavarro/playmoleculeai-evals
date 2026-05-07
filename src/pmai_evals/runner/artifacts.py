@@ -18,6 +18,7 @@ fresh ``run_id``.
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -94,10 +95,12 @@ class RunArtifactWriter(CellPaths):
     """Writer for one cell. Constructed by the executor per case/model/seed."""
 
     def ensure_dir(self) -> None:
-        self.cell_dir.mkdir(parents=True, exist_ok=True)
-        # A stale grade.json from a previous run of this cell would make the
-        # grader's "already graded, skip" guard fire against new artifacts.
-        self.grade_path.unlink(missing_ok=True)
+        # Each attempt starts from a clean cell so leftovers from a prior
+        # attempt (error.txt, grade.json, half-written trace, ...) cannot
+        # leak into the new run's summary or grading.
+        if self.cell_dir.exists():
+            shutil.rmtree(self.cell_dir)
+        self.cell_dir.mkdir(parents=True)
 
     def write_trace(self, trace: Trace) -> None:
         write_json(self.trace_path, trace.to_dict())

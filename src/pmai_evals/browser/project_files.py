@@ -1,21 +1,22 @@
-"""Drive the pmview File Browser panel to manage project files.
+"""Manage project files: list/delete via the backend API, upload via the UI.
 
-Uploads go through the frontend's hidden ``<input type=file>`` (the same
-path the chonky toolbar drives). The chonky grid is virtualized, so we
-confirm completion by polling the backend listing endpoint instead of
-scraping visible names.
+List and delete go through the agent backend's ``/v3/file*`` endpoints
+wrapped by :func:`authed_fetch` (auth refresh + transient retry). Uploads
+go through the frontend's hidden ``<input type=file>``, observing the
+resulting PUT responses so silent backend failures surface immediately
+and the call retries instead of timing out on a missing-files poll.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import unquote
 
 from pmai_evals.browser import locators
-from pmai_evals.errors import BrowserError
+from pmai_evals.errors import BrowserError, TerminalUploadError
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -64,6 +65,27 @@ async def _safe_body(resp: Any, limit: int = 200) -> str:
         return ""
 
 
+_TRANSIENT_STATUSES = frozenset({401, 408, 425, 429, 500, 502, 503, 504})
+# Uploads go through the browser's auth path, so 401/403 can clear after a
+# retry plus token rotation; we let the retry loop try once before giving up.
+_RETRIABLE_UPLOAD_STATUSES = frozenset({401, 403, 408, 425, 429, 500, 502, 503, 504})
+
+_DEFAULT_RETRIES = 2
+_DEFAULT_BACKOFF_S = 0.75
+
+
+async def _refresh_access_token(page: Page, frontend_url: str, csrf: str) -> bool:
+    """POST ``/v3/auth/refresh-token``; return whether the session rotated."""
+    resp = await page.request.fetch(
+        f"{frontend_url}/v3/auth/refresh-token",
+        method="POST",
+        headers={_CSRF_HEADER: csrf},
+    )
+    if not resp.ok:
+        logger.warning("refresh-token failed: status=%d", resp.status)
+    return resp.ok
+
+
 async def authed_fetch(
     page: Page,
     frontend_url: str,
@@ -72,26 +94,47 @@ async def authed_fetch(
     method: str = "GET",
     **kwargs: Any,
 ) -> Any:
-    """Fetch with auto-refresh on 401, mirroring pmview's auth flow.
+    """Authenticated request with one-shot refresh on 401 and bounded retry.
 
-    Long-running cases outlive the access-token TTL. On 401 we POST to
-    ``/v3/auth/refresh-token`` (cookies carry the refresh token) and replay
-    the original request once with the rotated CSRF.
+    Long-running cases outlive the access-token TTL: a 401 triggers a single
+    POST to ``/v3/auth/refresh-token`` (cookies carry the refresh token) and
+    a replay with the rotated CSRF. Transient failures (5xx, network
+    exceptions, persistent 401) are then retried with exponential backoff
+    before the last response is returned.
     """
     headers = dict(kwargs.pop("headers", None) or {})
-    headers[_CSRF_HEADER] = await _read_csrf_token(page, frontend_url)
-    resp = await page.request.fetch(url, method=method, headers=headers, **kwargs)
-    if resp.status != 401:
-        return resp
-    refresh = await page.request.fetch(
-        f"{frontend_url}/v3/auth/refresh-token",
-        method="POST",
-        headers={_CSRF_HEADER: headers[_CSRF_HEADER]},
-    )
-    if not refresh.ok:
-        return resp
-    headers[_CSRF_HEADER] = await _read_csrf_token(page, frontend_url)
-    return await page.request.fetch(url, method=method, headers=headers, **kwargs)
+    refresh_used = False
+    delay = _DEFAULT_BACKOFF_S
+
+    async def attempt() -> Any:
+        headers[_CSRF_HEADER] = await _read_csrf_token(page, frontend_url)
+        return await page.request.fetch(url, method=method, headers=headers, **kwargs)
+
+    last_attempt = _DEFAULT_RETRIES
+    for n in range(last_attempt + 1):
+        try:
+            resp = await attempt()
+            if resp.status == 401 and not refresh_used:
+                refresh_used = True
+                if await _refresh_access_token(page, frontend_url, headers[_CSRF_HEADER]):
+                    resp = await attempt()
+            if resp.status not in _TRANSIENT_STATUSES or n == last_attempt:
+                return resp
+            logger.warning(
+                "authed_fetch %s %s status=%d (attempt %d/%d); retry in %.2fs",
+                method, url, resp.status, n + 1, last_attempt + 1, delay,
+            )
+        except Exception as exc:
+            if n == last_attempt:
+                raise
+            logger.warning(
+                "authed_fetch %s %s raised %s (attempt %d/%d); retry in %.2fs",
+                method, url, exc, n + 1, last_attempt + 1, delay,
+            )
+        await asyncio.sleep(delay)
+        delay *= 2
+
+    raise BrowserError(f"{method} {url}: retry loop exhausted")
 
 
 async def _list_project_entries(
@@ -155,18 +198,63 @@ async def upload_to_project(
     frontend_url: str,
     timeout_s: float = 600.0,
 ) -> None:
-    """Upload ``local_paths`` to the project root via the chonky upload input.
+    """Upload ``local_paths`` via the frontend's hidden file input.
 
-    Polls the backend listing until every basename is visible (the chonky
-    grid is virtualized and unreliable as a completion signal).
+    Streaming and auth come for free from the browser. Each file's
+    ``PUT /v3/file/...`` response is observed so silent backend failures
+    raise immediately; the whole upload retries with backoff.
     """
     if not local_paths:
         return
-    expected = {p.name for p in local_paths}
+    last_attempt = _DEFAULT_RETRIES
+    for attempt in range(last_attempt + 1):
+        try:
+            await _upload_once(
+                page, local_paths,
+                project=project, frontend_url=frontend_url, timeout_s=timeout_s,
+            )
+            return
+        except TerminalUploadError:
+            raise
+        except BrowserError as exc:
+            if attempt == last_attempt:
+                raise
+            wait = 2.0 * (attempt + 1)
+            logger.warning(
+                "upload to %s failed (attempt %d/%d): %s; retry in %.1fs",
+                project, attempt + 1, last_attempt + 1, exc, wait,
+            )
+            await asyncio.sleep(wait)
+            # The frontend's upload path doesn't always refresh on its own;
+            # rotate tokens server-side so the next attempt sees fresh auth.
+            await _refresh_access_token(
+                page, frontend_url, await _read_csrf_token(page, frontend_url)
+            )
 
-    await _open_file_browser(page)
+
+async def _upload_once(
+    page: Page, local_paths: list[Path],
+    *, project: str, frontend_url: str, timeout_s: float,
+) -> None:
+    expected = {p.name for p in local_paths}
+    seen: dict[str, int] = {}
+    done = asyncio.Event()
+
+    def on_response(resp: Any) -> None:
+        if resp.request.method != "PUT" or "/v3/file/" not in resp.url:
+            return
+        name = unquote(resp.url.rsplit("/", 1)[-1])
+        if name in expected:
+            seen[name] = resp.status
+            if set(seen) >= expected:
+                done.set()
+
     try:
+        page.on("response", on_response)
+        await _open_file_browser(page)
         logger.info("uploading %d files to project %s", len(local_paths), project)
+        for p in local_paths:
+            logger.info("  -> %s (%.1f MB)", p.name, p.stat().st_size / 1e6)
         try:
             await page.locator(locators.PROJECT_UPLOAD_INPUT).first.set_input_files(
                 [str(p) for p in local_paths]
@@ -174,20 +262,20 @@ async def upload_to_project(
         except Exception as exc:
             raise BrowserError(f"set_input_files failed: {exc}") from exc
 
-        deadline = time.monotonic() + timeout_s
-        present: set[str] = set()
-        while time.monotonic() < deadline:
-            entries = await _list_project_entries(page, project, frontend_url)
-            present = {e["name"] for e in entries}
-            if expected.issubset(present):
-                logger.info("uploaded %d files to project %s", len(expected), project)
-                return
-            await asyncio.sleep(1.0)
-        missing = expected - present
-        raise BrowserError(
-            f"only {len(present & expected)}/{len(expected)} expected files "
-            f"appeared in {project} within {timeout_s:.0f}s; "
-            f"missing first 5: {sorted(missing)[:5]}"
-        )
+        try:
+            await asyncio.wait_for(done.wait(), timeout=timeout_s)
+        except TimeoutError:
+            raise BrowserError(
+                f"upload timed out after {timeout_s:.0f}s; "
+                f"no PUT response for: {sorted(expected - set(seen))[:5]}"
+            ) from None
+
+        if bad := {n: s for n, s in seen.items() if s >= 400}:
+            terminal = any(s not in _RETRIABLE_UPLOAD_STATUSES for s in bad.values())
+            cls = TerminalUploadError if terminal else BrowserError
+            raise cls(f"upload PUTs failed: {bad}")
+
+        logger.info("uploaded %d files to project %s", len(expected), project)
     finally:
+        page.remove_listener("response", on_response)
         await _close_file_browser(page)

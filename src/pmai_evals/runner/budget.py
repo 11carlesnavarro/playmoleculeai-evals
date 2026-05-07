@@ -12,7 +12,6 @@ import logging
 from pathlib import Path
 
 from pmai_evals.errors import BudgetExceededError
-from pmai_evals.pricing import cost_for_usage
 from pmai_evals.schemas import CostCharge, CostJournal
 
 logger = logging.getLogger(__name__)
@@ -56,15 +55,14 @@ class Budget:
         seed: int,
         input_tokens: int,
         output_tokens: int,
-        cached_tokens: int = 0,
+        cached_tokens: int,
+        cost_usd: float,
     ) -> CostCharge:
-        """Add one rollout's cost to the running total and persist."""
-        cost = cost_for_usage(
-            model_id=model,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cached_tokens=cached_tokens,
-        )
+        """Add one rollout's cost to the running total and persist.
+
+        ``cost_usd`` must already be priced per-API-call (so each request gets
+        the correct tier); see :func:`pmai_evals.trace.parse_trace`.
+        """
         charge = CostCharge(
             case_id=case_id,
             model=model,
@@ -72,14 +70,14 @@ class Budget:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_tokens=cached_tokens,
-            cost_usd=cost,
+            cost_usd=cost_usd,
         )
         self._journal.charges.append(charge)
-        self._journal.total_cost_usd = round(self._journal.total_cost_usd + cost, 6)
+        self._journal.total_cost_usd = round(self._journal.total_cost_usd + cost_usd, 6)
         self._save()
         logger.info(
             "charged %s/%s seed=%d cost=$%.4f total=$%.4f / $%.2f",
-            case_id, model, seed, cost,
+            case_id, model, seed, cost_usd,
             self._journal.total_cost_usd, self._journal.max_cost_usd,
         )
         return charge

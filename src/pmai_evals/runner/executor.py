@@ -30,7 +30,6 @@ from pmai_evals.errors import (
     PMAIEvalsError,
     TraceNotFoundError,
 )
-from pmai_evals.pricing import cost_for_usage
 from pmai_evals.runner.artifacts import RunArtifactWriter, CellPaths, iter_cell_paths
 from pmai_evals.runner.budget import Budget
 from pmai_evals.runner.manifest import MatrixEntry, build_manifest, write_manifest
@@ -373,12 +372,7 @@ async def _run_one(
         writer.write_viewer_selection(viewer_selection)
         writer.write_final_answer(final_answer or trace.final_answer)
 
-        cost = cost_for_usage(
-            model_id=entry.model,
-            input_tokens=trace.usage.input_tokens,
-            output_tokens=trace.usage.output_tokens,
-            cached_tokens=trace.usage.cached_tokens,
-        )
+        cost = trace.cost_usd
         writer.write_metrics({
             "input_tokens": trace.usage.input_tokens,
             "output_tokens": trace.usage.output_tokens,
@@ -397,6 +391,7 @@ async def _run_one(
             input_tokens=trace.usage.input_tokens,
             output_tokens=trace.usage.output_tokens,
             cached_tokens=trace.usage.cached_tokens,
+            cost_usd=cost,
         )
 
         status = CaseStatus.timed_out if status_str == "timed_out" else CaseStatus.completed

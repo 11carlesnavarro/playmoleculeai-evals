@@ -1,42 +1,59 @@
 # Model registry + price table.
 #
-# Update prices manually as providers change them. Costs are USD per million
-# tokens. Prices are intentionally rough — they're for budget enforcement,
-# not accounting. Verify against the provider's current pricing page before
-# trusting absolute dollar figures.
+# Costs are USD per million tokens. Each model carries an ordered list of
+# tiers; the first tier whose ``max_prompt_tokens`` is unset (or where the
+# request's input_tokens fits) is used. Mirrors the dashboard's
+# ``MODEL_PRICE_TIERS`` so eval and dashboard report comparable costs.
 
 models:
   - id: gpt-5.4
     provider: openai
-    input_per_mtok_usd: 5.00
-    output_per_mtok_usd: 15.00
-    cached_input_per_mtok_usd: 1.25
     supports_vision: true
-
-  - id: claude-sonnet-4-6
-    provider: anthropic
-    input_per_mtok_usd: 3.00
-    output_per_mtok_usd: 15.00
-    cached_input_per_mtok_usd: 0.30
-    supports_vision: true
-
-  - id: gemini-3.1-pro-preview
-    provider: google
-    input_per_mtok_usd: 1.25
-    output_per_mtok_usd: 5.00
-    cached_input_per_mtok_usd: 0.31
-    supports_vision: true
+    tiers:
+      - input_per_mtok_usd: 2.50
+        cached_input_per_mtok_usd: 0.25
+        output_per_mtok_usd: 20.00
+        max_prompt_tokens: 272000
+      - input_per_mtok_usd: 5.00
+        cached_input_per_mtok_usd: 0.50
+        output_per_mtok_usd: 30.00
 
   - id: gpt-5.4-mini
     provider: openai
-    input_per_mtok_usd: 0.40
-    output_per_mtok_usd: 1.60
-    cached_input_per_mtok_usd: 0.10
     supports_vision: true
+    tiers:
+      - input_per_mtok_usd: 0.75
+        cached_input_per_mtok_usd: 0.075
+        output_per_mtok_usd: 4.50
 
   - id: gpt-5.4-nano
     provider: openai
-    input_per_mtok_usd: 0.10
-    output_per_mtok_usd: 0.40
-    cached_input_per_mtok_usd: 0.025
     supports_vision: false
+    tiers:
+      - input_per_mtok_usd: 0.20
+        cached_input_per_mtok_usd: 0.02
+        output_per_mtok_usd: 1.25
+
+  - id: claude-sonnet-4-6
+    provider: anthropic
+    supports_vision: true
+    tiers:
+      - input_per_mtok_usd: 3.00
+        cached_input_per_mtok_usd: 0.30
+        output_per_mtok_usd: 15.00
+        max_prompt_tokens: 200000
+      - input_per_mtok_usd: 6.00
+        cached_input_per_mtok_usd: 0.60
+        output_per_mtok_usd: 22.50
+
+  - id: gemini-3.1-pro-preview
+    provider: google
+    supports_vision: true
+    tiers:
+      - input_per_mtok_usd: 2.00
+        cached_input_per_mtok_usd: 0.20
+        output_per_mtok_usd: 12.00
+        max_prompt_tokens: 200000
+      - input_per_mtok_usd: 4.00
+        cached_input_per_mtok_usd: 0.40
+        output_per_mtok_usd: 18.00

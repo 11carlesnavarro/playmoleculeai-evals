@@ -26,6 +26,18 @@ class CaseStatus(StrEnum):
 
 # --- model registry --------------------------------------------------------
 
+class PriceTier(BaseModel):
+    """One pricing band. Selected when ``input_tokens <= max_prompt_tokens``;
+    the last tier (``max_prompt_tokens=None``) is the catch-all."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    input_per_mtok_usd: float
+    cached_input_per_mtok_usd: float
+    output_per_mtok_usd: float
+    max_prompt_tokens: int | None = None
+
+
 class ModelEntry(BaseModel):
     """One row of ``pricing.yaml``."""
 
@@ -33,10 +45,14 @@ class ModelEntry(BaseModel):
 
     id: str
     provider: Literal["openai", "anthropic", "google"]
-    input_per_mtok_usd: float = 0.0
-    output_per_mtok_usd: float = 0.0
-    cached_input_per_mtok_usd: float = 0.0
+    tiers: list[PriceTier]
     supports_vision: bool = True
+
+    def select_tier(self, input_tokens: int) -> PriceTier:
+        for tier in self.tiers:
+            if tier.max_prompt_tokens is None or input_tokens <= tier.max_prompt_tokens:
+                return tier
+        return self.tiers[-1]
 
 
 class ModelRegistry(BaseModel):

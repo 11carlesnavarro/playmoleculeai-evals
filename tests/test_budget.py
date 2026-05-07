@@ -20,8 +20,10 @@ def test_budget_charges_and_persists(tmp_path: Path) -> None:
         seed=0,
         input_tokens=1_000_000,
         output_tokens=1_000_000,
+        cached_tokens=0,
+        cost_usd=0.5,
     )
-    assert charge.cost_usd > 0
+    assert charge.cost_usd == 0.5
     persisted = json.loads(journal.read_text())
     assert persisted["total_cost_usd"] == budget.total_cost_usd
     assert len(persisted["charges"]) == 1
@@ -36,6 +38,8 @@ def test_budget_exceeds(tmp_path: Path) -> None:
         seed=0,
         input_tokens=10_000_000,
         output_tokens=10_000_000,
+        cached_tokens=0,
+        cost_usd=10.0,
     )
     with pytest.raises(BudgetExceededError):
         budget.check()

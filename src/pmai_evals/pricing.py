@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -11,6 +12,13 @@ from pmai_evals.errors import ConfigError
 from pmai_evals.schemas import ModelEntry, ModelRegistry
 
 _PRICING_PATH = Path(__file__).parent / "pricing.yaml"
+_DATE_SUFFIX_RE = re.compile(r"[-_]\d{4}-\d{2}-\d{2}$")
+
+
+def normalize_model_id(model_id: str) -> str:
+    """Strip the trailing ``-YYYY-MM-DD`` snapshot suffix providers tack on."""
+
+    return _DATE_SUFFIX_RE.sub("", model_id.strip())
 
 
 @lru_cache(maxsize=1)
@@ -35,27 +43,30 @@ def cost_for_usage(
 ) -> float:
     """Compute the USD cost of one rollout from token counts.
 
-    Cached tokens are billed at the cached input rate (and excluded from the
-    full input rate). Unknown models charge zero — flagged via warning at
-    the call site, never silently.
+    Cached tokens are a subset of ``input_tokens`` and are billed at the
+    cached rate; the rest is billed at the fresh-input rate. The price tier
+    is selected by total ``input_tokens`` against each tier's
+    ``max_prompt_tokens``. Unknown models return 0.0.
     """
 
     registry = load_registry()
     try:
-        entry: ModelEntry = registry.get(model_id)
+        entry: ModelEntry = registry.get(normalize_model_id(model_id))
     except KeyError:
         return 0.0
 
-    fresh_input = max(input_tokens - cached_tokens, 0)
+    cached_tokens = min(max(cached_tokens, 0), input_tokens)
+    fresh_input = input_tokens - cached_tokens
+    tier = entry.select_tier(input_tokens)
     return (
-        fresh_input * entry.input_per_mtok_usd / 1_000_000.0
-        + cached_tokens * entry.cached_input_per_mtok_usd / 1_000_000.0
-        + output_tokens * entry.output_per_mtok_usd / 1_000_000.0
-    )
+        fresh_input * tier.input_per_mtok_usd
+        + cached_tokens * tier.cached_input_per_mtok_usd
+        + output_tokens * tier.output_per_mtok_usd
+    ) / 1_000_000.0
 
 
 def supports_vision(model_id: str) -> bool:
     try:
-        return load_registry().get(model_id).supports_vision
+        return load_registry().get(normalize_model_id(model_id)).supports_vision
     except KeyError:
         return False

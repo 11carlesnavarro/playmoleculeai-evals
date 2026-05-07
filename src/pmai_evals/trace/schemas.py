@@ -69,6 +69,7 @@ class Trace:
     metrics: TimingMetrics
     final_answer: str
     status: TraceStatus
+    cost_usd: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

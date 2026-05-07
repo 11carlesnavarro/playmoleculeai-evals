@@ -39,16 +39,6 @@ def render_markdown(benchmark: dict[str, Any]) -> str:
         lines.append(
             f"| `{m['model']}` | {cases} | {ar} | {rp} | {rm} | ${m['cost_usd']:.4f} |"
         )
-
-    lines += ["", "## Per-case breakdown", ""]
-    for case_id, info in sorted((benchmark.get("cases") or {}).items()):
-        lines += [f"### `{case_id}`", "", "| Model | Assertions | Rubric |", "|---|---|---|"]
-        for model, stats in sorted(info.get("models", {}).items()):
-            ar = f"{stats['assertions_passed']}/{stats['assertions_total']}"
-            passed = stats.get("rubric_passed")
-            rp = "✓" if passed is True else ("✗" if passed is False else "—")
-            lines.append(f"| `{model}` | {ar} | {rp} |")
-        lines.append("")
     return "\n".join(lines) + "\n"
 
 

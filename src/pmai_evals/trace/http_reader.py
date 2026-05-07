@@ -17,6 +17,7 @@ import json
 from typing import Any
 
 from pmai_evals._io import parse_json_lenient
+from pmai_evals.pricing import cost_for_usage
 from pmai_evals.trace.schemas import (
     Message,
     TimingMetrics,
@@ -78,30 +79,32 @@ def _unwrap(row: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     return item, row
 
 
-def _add_usage(meta: dict[str, Any], totals: dict[str, int]) -> None:
+def _parse_usage(meta: dict[str, Any]) -> dict[str, int] | None:
     raw = meta.get("usage")
     if not isinstance(raw, str) or not raw:
-        return
+        return None
     try:
         usage = json.loads(raw)
     except Exception:
-        return
+        return None
     if not isinstance(usage, dict):
-        return
-    totals["input_tokens"] += int(usage.get("input_tokens") or 0)
-    totals["output_tokens"] += int(usage.get("output_tokens") or 0)
+        return None
     cached = usage.get("cached_tokens")
     if cached is None:
         details = usage.get("input_tokens_details")
         if isinstance(details, dict):
             cached = details.get("cached_tokens")
-    totals["cached_tokens"] += int(cached or 0)
     reasoning = usage.get("reasoning_tokens")
     if reasoning is None:
         details = usage.get("output_tokens_details")
         if isinstance(details, dict):
             reasoning = details.get("reasoning_tokens")
-    totals["reasoning_tokens"] += int(reasoning or 0)
+    return {
+        "input_tokens": int(usage.get("input_tokens") or 0),
+        "output_tokens": int(usage.get("output_tokens") or 0),
+        "cached_tokens": int(cached or 0),
+        "reasoning_tokens": int(reasoning or 0),
+    }
 
 
 def parse_trace(
@@ -124,6 +127,11 @@ def parse_trace(
         "cached_tokens": 0,
         "reasoning_tokens": 0,
     }
+    # Each Responses-API response is stored as multiple rows (one per output
+    # item) sharing a response_id; the upstream writes the same per-response
+    # ``usage`` JSON on every row. Aggregate (and price) once per response.
+    seen_response_ids: set[str] = set()
+    cost_usd = 0.0
     total_ms = 0
     ttft_ms: int | None = None
     tool_latency_ms = 0
@@ -154,7 +162,21 @@ def parse_trace(
             )
         )
 
-        _add_usage(meta, usage_totals)
+        if not response_id or response_id not in seen_response_ids:
+            if response_id:
+                seen_response_ids.add(response_id)
+            usage = _parse_usage(meta)
+            if usage is not None:
+                for key, value in usage.items():
+                    usage_totals[key] += value
+                response_model = msg_model or model
+                if response_model:
+                    cost_usd += cost_for_usage(
+                        model_id=response_model,
+                        input_tokens=usage["input_tokens"],
+                        output_tokens=usage["output_tokens"],
+                        cached_tokens=usage["cached_tokens"],
+                    )
         latency = meta.get("latency_ms")
         if isinstance(latency, (int, float)):
             total_ms += int(latency)
@@ -231,4 +253,5 @@ def parse_trace(
         ),
         final_answer=last_assistant_text or "",
         status=status,
+        cost_usd=cost_usd,
     )

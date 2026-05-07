@@ -31,6 +31,10 @@ class AuthError(BrowserError):
     """Login failed or storage state is unusable."""
 
 
+class TerminalUploadError(BrowserError):
+    """Upload PUT returned a status that retrying cannot fix (e.g. 413)."""
+
+
 class ChatTimeoutError(BrowserError):
     """A chat rollout did not finish within the configured timeout."""
 
