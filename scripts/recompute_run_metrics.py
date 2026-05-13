@@ -16,7 +16,7 @@ from pathlib import Path
 from pmai_evals.trace.http_reader import parse_trace
 
 
-def _load_chat_rows(con: sqlite3.Connection, chat_uid: str) -> list[dict] | None:
+def _load_chat_rows(con: sqlite3.Connection, chat_uid: str) -> list[dict[str, object]] | None:
     chat = con.execute("SELECT id FROM chats WHERE chat_uid=?", (chat_uid,)).fetchone()
     if chat is None:
         return None
@@ -43,7 +43,8 @@ def main(run_dir: Path, agent_db: Path) -> None:
     summary = json.loads(summary_path.read_text())
     old_total = float(summary.get("total_cost_usd") or 0.0)
 
-    charges: list[dict] = []
+    kept_cases: list[dict[str, object]] = []
+    charges: list[dict[str, object]] = []
     total_cost = 0.0
 
     for case in summary["cases"]:
@@ -51,51 +52,60 @@ def main(run_dir: Path, agent_db: Path) -> None:
         trace_path = cell / "trace.json"
         metrics_path = cell / "metrics.json"
         if not trace_path.exists() or not metrics_path.exists():
-            print(f"  skip (no artifacts): {case['artifact_dir']}")
+            print(f"  drop (no artifacts): {case['artifact_dir']}")
             continue
 
         old_trace = json.loads(trace_path.read_text())
         chat_uid = old_trace.get("chat_id") or ""
-        rows = _load_chat_rows(con, chat_uid)
-        if rows is None:
-            print(f"  skip (chat {chat_uid} not in db): {case['artifact_dir']}")
-            continue
+        rows = _load_chat_rows(con, chat_uid) if chat_uid else None
+        metrics = json.loads(metrics_path.read_text())
 
-        trace = parse_trace(rows, chat_uid, model=case["model"])
-        new_trace = trace.to_dict()
-        # ``to_dict`` emits enum members as objects; coerce status to string for json.
-        new_trace["status"] = str(trace.status)
-        _write_json(trace_path, new_trace)
+        if rows is not None:
+            trace = parse_trace(rows, chat_uid, model=case["model"])
+            new_trace = trace.to_dict()
+            # ``to_dict`` emits enum members as objects; coerce status for json.
+            new_trace["status"] = str(trace.status)
+            _write_json(trace_path, new_trace)
+            metrics.update({
+                "input_tokens": trace.usage.input_tokens,
+                "output_tokens": trace.usage.output_tokens,
+                "cached_tokens": trace.usage.cached_tokens,
+                "reasoning_tokens": trace.usage.reasoning_tokens,
+                "ttft_ms": trace.metrics.ttft_ms,
+                "total_ms": trace.metrics.total_ms,
+                "tool_latency_ms": trace.metrics.tool_latency_ms,
+                "cost_usd": trace.cost_usd,
+                "trace_status": str(trace.status),
+            })
+            _write_json(metrics_path, metrics)
+            note = ""
+        else:
+            note = "  [kept: chat not in db]"
 
-        old_metrics = json.loads(metrics_path.read_text())
-        old_metrics.update({
-            "input_tokens": trace.usage.input_tokens,
-            "output_tokens": trace.usage.output_tokens,
-            "cached_tokens": trace.usage.cached_tokens,
-            "reasoning_tokens": trace.usage.reasoning_tokens,
-            "ttft_ms": trace.metrics.ttft_ms,
-            "total_ms": trace.metrics.total_ms,
-            "tool_latency_ms": trace.metrics.tool_latency_ms,
-            "cost_usd": trace.cost_usd,
-            "trace_status": str(trace.status),
-        })
-        _write_json(metrics_path, old_metrics)
-
-        case["cost_usd"] = trace.cost_usd
-        total_cost += trace.cost_usd
+        case_cost = float(metrics.get("cost_usd") or 0.0)
+        in_tokens = int(metrics.get("input_tokens") or 0)
+        out_tokens = int(metrics.get("output_tokens") or 0)
+        cached = int(metrics.get("cached_tokens") or 0)
+        case["cost_usd"] = case_cost
+        total_cost += case_cost
+        kept_cases.append(case)
 
         charges.append({
             "case_id": case["case_id"],
             "model": case["model"],
             "seed": case["seed"],
-            "input_tokens": trace.usage.input_tokens,
-            "output_tokens": trace.usage.output_tokens,
-            "cached_tokens": trace.usage.cached_tokens,
-            "cost_usd": trace.cost_usd,
+            "input_tokens": in_tokens,
+            "output_tokens": out_tokens,
+            "cached_tokens": cached,
+            "cost_usd": case_cost,
         })
 
-        print(f"  {case['case_id']:12s}  in={trace.usage.input_tokens:>10,}  out={trace.usage.output_tokens:>7,}  cost=${trace.cost_usd:.4f}")
+        print(
+            f"  {case['case_id']:12s}  in={in_tokens:>10,}  out={out_tokens:>7,}  "
+            f"cost=${case_cost:.4f}{note}"
+        )
 
+    summary["cases"] = kept_cases
     summary["total_cost_usd"] = round(total_cost, 6)
     _write_json(summary_path, summary)
 

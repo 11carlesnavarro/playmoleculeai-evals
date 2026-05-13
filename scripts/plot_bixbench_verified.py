@@ -33,31 +33,46 @@ PALETTE = LinearSegmentedColormap.from_list(
 )
 
 
-def accuracy_pct(run_dir: Path, model: str) -> float:
+def accuracy_stats(run_dir: Path, model: str) -> tuple[float, float | None]:
+    """Return (mean_pct, std_pct) across seeds for ``model``.
+
+    Falls back to the pooled assertion pass rate when a single seed was run.
+    """
     bench = json.loads((run_dir / "benchmark.json").read_text())
-    passed = total = 0
-    for case in bench["cases"].values():
-        m = case["models"].get(model)
-        if not m:
+    for entry in bench.get("models", []):
+        if entry.get("model") != model:
             continue
-        passed += m["assertions_passed"]
-        total += m["assertions_total"]
-    if total == 0:
-        raise SystemExit(f"no graded cases for model {model!r} in {run_dir}")
-    return 100 * passed / total
+        mean = entry.get("assertion_pass_rate_mean")
+        std = entry.get("assertion_pass_rate_std")
+        if mean is None:
+            mean = entry.get("assertion_pass_rate")
+        if mean is None:
+            break
+        return 100 * mean, (100 * std if std is not None else None)
+    raise SystemExit(f"no graded cases for model {model!r} in {run_dir}")
 
 
-def plot(rows: list[tuple[str, float]], out: Path, title: str) -> None:
-    labels, values = zip(*rows)
+def plot(
+    rows: list[tuple[str, float, float | None]], out: Path, title: str
+) -> None:
+    labels = [r[0] for r in rows]
+    values = [r[1] for r in rows]
+    stds = [r[2] for r in rows]
     # One palette stop per bar, evenly spaced across the ramp by rank. Each
     # bar therefore gets a unique slate shade regardless of how close two
     # scores happen to land.
     n = len(rows)
     colors = [PALETTE(i / (n - 1)) for i in range(n)]
     edge = PALETTE(0.95)
+    yerr = [s if s is not None else 0.0 for s in stds]
 
     fig, ax = plt.subplots(figsize=(7.2, 7.0))
-    bars = ax.bar(labels, values, color=colors, edgecolor=edge, linewidth=1.0)
+    bars = ax.bar(
+        labels, values,
+        color=colors, edgecolor=edge, linewidth=1.0,
+        yerr=yerr, capsize=6,
+        error_kw={"ecolor": "#1f2533", "elinewidth": 1.2},
+    )
     for bar, v, i in zip(bars, values, range(n)):
         text_color = "#ffffff" if i / (n - 1) > 0.55 else "#1f2533"
         ax.text(
@@ -92,9 +107,13 @@ def main() -> None:
     args = parser.parse_args()
 
     run_dir = args.results_dir / args.run
-    ours_pct = accuracy_pct(run_dir, args.model)
+    ours_mean, ours_std = accuracy_stats(run_dir, args.model)
     label = args.label.replace("\\n", "\n")
-    rows = sorted([*BASELINES, (label, ours_pct)], key=lambda r: r[1])
+    rows: list[tuple[str, float, float | None]] = [
+        (lbl, val, None) for lbl, val in BASELINES
+    ]
+    rows.append((label, ours_mean, ours_std))
+    rows.sort(key=lambda r: r[1])
     plot(rows, args.out, "BixBench-Verified-50")
 
 

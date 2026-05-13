@@ -1,0 +1,16 @@
+# Eval set: structure-analysis
+#
+# Scope (in): pulling information out of a 3D structure. Distances,
+# angles, contacts, residues within a cutoff of a ligand or partner
+# chain, pocket characterisation, SASA, geometric comparisons between
+# aligned structures.
+#
+# Scope (out): tasks whose primary output is a transformed structure
+# (alignment, superposition, mutation building) or a pure rendering.
+# Those belong to molecular-visualization.
+#
+# Viewer use: cases may direct the agent to highlight what it has
+# measured. Grading may then check the viewer state in addition to the
+# textual answer, but the analytical result is the load-bearing signal.
+
+cases: []

@@ -4,7 +4,7 @@ Evals for playmoleculeAI.
 
 ## Relevant paths
 
-- **playmoleculeAI agentic code** (harness, agents, prompts, skills): `/fast_shared/users/carles/repos/acellera/playmoleculeAI`
+- **playmoleculeAI agentic code** (harness, agents, prompts, skills): `/fast_shared/users/carles/repos/carles/playmoleculeAI`
 - **acellera skills**: `/fast_shared/users/carles/repos/acellera/acellera-skills`
 - **SQLite databases with traces**: `/fast_shared/users/carles/data/playmoleculeAIdata/data/databases`
     - dev: `/fast_shared/users/carles/data/playmoleculeAIdata/data/databases/dev/agent.db`

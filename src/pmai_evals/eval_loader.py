@@ -20,7 +20,8 @@ def _load_checks_module(eval_set_id: str, checks_path: Path) -> ModuleType:
 
     Namespacing avoids collision when multiple eval sets ship a ``checks.py``.
     """
-    mod_name = f"pmai_evals_checks__{eval_set_id.replace('-', '_')}"
+    sanitized = eval_set_id.replace("/", "__").replace("-", "_")
+    mod_name = f"pmai_evals_checks__{sanitized}"
     spec = importlib.util.spec_from_file_location(mod_name, checks_path)
     if spec is None or spec.loader is None:
         raise EvalSetLoadError(f"could not build import spec for {checks_path}")

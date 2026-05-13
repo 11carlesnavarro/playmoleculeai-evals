@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import statistics
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,8 +17,9 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
-class ModelStats:
-    model: str
+class CellAccumulator:
+    """Per-cell stats. Used as both per-seed row and pooled model row."""
+
     cases_total: int = 0
     cases_completed: int = 0
     cases_failed: int = 0
@@ -51,11 +53,7 @@ class ModelStats:
         return math.sqrt(variance / len(self.rubric_scores))
 
     def to_dict(self) -> dict[str, Any]:
-        def _round(value: float | None, ndigits: int) -> float | None:
-            return None if value is None else round(value, ndigits)
-
         return {
-            "model": self.model,
             "cases_total": self.cases_total,
             "cases_completed": self.cases_completed,
             "cases_failed": self.cases_failed,
@@ -73,6 +71,10 @@ class ModelStats:
         }
 
 
+def _round(value: float | None, ndigits: int) -> float | None:
+    return None if value is None else round(value, ndigits)
+
+
 _STATUS_FIELD = {
     "completed": "cases_completed",
     "failed": "cases_failed",
@@ -81,56 +83,93 @@ _STATUS_FIELD = {
 }
 
 
+def _seed_summary(seeds: list[dict[str, Any]], key: str) -> dict[str, float | None]:
+    values = [s[key] for s in seeds if s.get(key) is not None]
+    if not values:
+        return {"mean": None, "std": None}
+    mean = sum(values) / len(values)
+    std = statistics.stdev(values) if len(values) >= 2 else None
+    return {"mean": round(mean, 4), "std": round(std, 4) if std is not None else None}
+
+
 def aggregate_run(run_dir: Path) -> dict[str, Any]:
     """Build the benchmark summary dict and write ``benchmark.json``."""
     if not run_dir.is_dir():
         raise FileNotFoundError(f"run dir not found: {run_dir}")
 
     summary = read_json_or(run_dir / "summary.json", {})
-    by_model: dict[str, ModelStats] = {}
+    pooled: dict[str, CellAccumulator] = defaultdict(CellAccumulator)
+    by_seed: dict[tuple[str, int], CellAccumulator] = defaultdict(CellAccumulator)
     per_case: dict[str, dict[str, Any]] = defaultdict(
         lambda: {"models": {}, "rubric": {}}
     )
 
-    def _stats(model: str) -> ModelStats:
-        return by_model.setdefault(model, ModelStats(model=model))
-
     for case_summary in summary.get("cases", []):
-        stats = _stats(case_summary["model"])
-        stats.cases_total += 1
-        stats.cost_usd += float(case_summary.get("cost_usd") or 0)
+        model = case_summary["model"]
+        seed = int(case_summary.get("seed", 0))
+        cost = float(case_summary.get("cost_usd") or 0)
         field_name = _STATUS_FIELD.get(case_summary.get("status"))
-        if field_name:
-            setattr(stats, field_name, getattr(stats, field_name) + 1)
+        for acc in (pooled[model], by_seed[(model, seed)]):
+            acc.cases_total += 1
+            acc.cost_usd += cost
+            if field_name:
+                setattr(acc, field_name, getattr(acc, field_name) + 1)
 
-    for _cell, grade in iter_grade_files(run_dir):
+    for _, grade in iter_grade_files(run_dir):
         model = grade.get("model", "?")
+        seed = int(grade.get("seed", 0))
         case_id = grade.get("case_id", "?")
-        stats = _stats(model)
         s = grade.get("summary") or {}
-        stats.assertions_passed += int(s.get("assertions_passed") or 0)
-        stats.assertions_total += int(s.get("assertions_total") or 0)
+        ap = int(s.get("assertions_passed") or 0)
+        at = int(s.get("assertions_total") or 0)
         rubric = grade.get("rubric") or None
-        if rubric:
-            stats.rubric_total += 1
-            if rubric.get("passed"):
-                stats.rubric_pass += 1
-            score = rubric.get("overall_score")
-            if isinstance(score, int | float):
-                stats.rubric_scores.append(float(score))
-                per_case[case_id]["rubric"][model] = float(score)
+        for acc in (pooled[model], by_seed[(model, seed)]):
+            acc.assertions_passed += ap
+            acc.assertions_total += at
+            if rubric:
+                acc.rubric_total += 1
+                if rubric.get("passed"):
+                    acc.rubric_pass += 1
+                score = rubric.get("overall_score")
+                if isinstance(score, int | float):
+                    acc.rubric_scores.append(float(score))
+        if rubric and isinstance(rubric.get("overall_score"), int | float):
+            per_case[case_id]["rubric"][model] = float(rubric["overall_score"])
         per_case[case_id]["models"][model] = {
-            "assertions_passed": int(s.get("assertions_passed") or 0),
-            "assertions_total": int(s.get("assertions_total") or 0),
+            "assertions_passed": ap,
+            "assertions_total": at,
             "rubric_passed": s.get("rubric_passed"),
         }
+
+    seeds_by_model: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for (model, seed), acc in sorted(by_seed.items()):
+        seeds_by_model[model].append({"seed": seed, **acc.to_dict()})
+
+    models_out: list[dict[str, Any]] = []
+    for model, acc in pooled.items():
+        seeds = seeds_by_model.get(model, [])
+        ar_summary = _seed_summary(seeds, "assertion_pass_rate")
+        rp_summary = _seed_summary(seeds, "rubric_pass_rate")
+        rm_summary = _seed_summary(seeds, "rubric_mean")
+        models_out.append({
+            "model": model,
+            **acc.to_dict(),
+            "n_seeds": len(seeds),
+            "seeds": seeds,
+            "assertion_pass_rate_mean": ar_summary["mean"],
+            "assertion_pass_rate_std": ar_summary["std"],
+            "rubric_pass_rate_mean": rp_summary["mean"],
+            "rubric_pass_rate_std": rp_summary["std"],
+            "rubric_mean_seed_mean": rm_summary["mean"],
+            "rubric_mean_seed_std": rm_summary["std"],
+        })
 
     benchmark = {
         "run_id": summary.get("run_id"),
         "eval_set": summary.get("eval_set"),
         "total_cost_usd": summary.get("total_cost_usd"),
         "aborted_over_budget": summary.get("aborted_over_budget"),
-        "models": [stats.to_dict() for stats in by_model.values()],
+        "models": models_out,
         "cases": dict(per_case),
     }
     out = run_dir / "benchmark.json"

@@ -4,7 +4,8 @@
 
 - **Eval set** — a directory of declarative YAML, fixtures, and optional
   Python checks describing a related family of evaluations. Identified by
-  a kebab-case `id` (e.g. `molecular-visualization`).
+  a kebab-case `id` that mirrors its path under `eval_sets/` (e.g.
+  `acellera-bench/molecular-visualization`).
 - **Case** — one prompt with assertions and optional rubric. Identified by
   a kebab-case `id` unique within an eval set.
 - **Cell** — one (case, model, seed) triple. The atomic unit of work and

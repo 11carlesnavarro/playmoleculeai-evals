@@ -8,8 +8,8 @@ from pmai_evals.eval_loader import load_eval_set
 
 
 def test_load_molecular_visualization() -> None:
-    es = load_eval_set("molecular-visualization", root=Path("eval_sets"))
-    assert es.spec.id == "molecular-visualization"
+    es = load_eval_set("acellera-bench/molecular-visualization", root=Path("eval_sets"))
+    assert es.spec.id == "acellera-bench/molecular-visualization"
     assert es.spec.skill_under_test == "pmview"
     assert len(es.cases) >= 1
     case_ids = [c.id for c in es.cases]

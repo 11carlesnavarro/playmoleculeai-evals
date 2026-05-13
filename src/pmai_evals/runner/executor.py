@@ -52,7 +52,8 @@ T = TypeVar("T")
 def make_run_id(eval_set_id: str, label: str, *, now: datetime | None = None) -> str:
     moment = (now or datetime.now(UTC)).strftime("%Y%m%d-%H%M%S")
     safe_label = label.replace(" ", "-").replace("/", "-")
-    return f"{moment}_{eval_set_id}_{safe_label}"
+    safe_id = eval_set_id.replace("/", "__")
+    return f"{moment}_{safe_id}_{safe_label}"
 
 
 def _read_git_sha() -> str | None:

@@ -25,15 +25,15 @@ Three commands: `run` executes the agent and collects artifacts,
 
 ```bash
 # Dry-run first to validate the matrix.
-uv run pmai-evals run --eval-set molecular-visualization --case mv-5483 --models gpt-5.4-mini --dry-run
+uv run pmai-evals run --eval-set acellera-bench/molecular-visualization --case mv-5483 --models gpt-5.4-mini --dry-run
 
 # Real run, grade, report.
-uv run pmai-evals run    --eval-set molecular-visualization --case mv-5483 --models gpt-5.4-mini
+uv run pmai-evals run    --eval-set acellera-bench/molecular-visualization --case mv-5483 --models gpt-5.4-mini
 uv run pmai-evals grade  <run_id>
 uv run pmai-evals report <run_id>
 
 # Or chain them in one shot (--auto-report implies --auto-grade):
-uv run pmai-evals run --eval-set molecular-visualization --case mv-5483 --models gpt-5.4-mini --auto-report
+uv run pmai-evals run --eval-set acellera-bench/molecular-visualization --case mv-5483 --models gpt-5.4-mini --auto-report
 ```
 
 `--models` is required and accepts a comma-separated list of model ids

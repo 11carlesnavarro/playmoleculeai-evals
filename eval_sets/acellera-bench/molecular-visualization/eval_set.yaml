@@ -1,4 +1,4 @@
-id: molecular-visualization
+id: acellera-bench/molecular-visualization
 skill_under_test: pmview
 description: |
   Basic molecular viewer operations exercised end-to-end through the

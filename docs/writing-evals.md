@@ -27,7 +27,7 @@ All files are YAML or markdown. Cases are data, not code.
 Top-level metadata for the whole set:
 
 ```yaml
-id: molecular-visualization          # must match the directory name
+id: acellera-bench/molecular-visualization   # must match the path under eval_sets/
 skill_under_test: pmview              # which agent skill this exercises
 description: |
   Basic molecular viewer operations — load PDBs, select residues,
@@ -265,10 +265,12 @@ free and deterministic.
 
 ## Adding a new eval set
 
-Same as above, but start by copying `eval_sets/molecular-visualization/`
-to `eval_sets/<new-id>/` and editing the metadata. The directory name
-must match `id:` in `eval_set.yaml`. Everything else — judge, runner,
-reporter — picks the new set up automatically.
+Same as above, but start by copying `eval_sets/acellera-bench/molecular-visualization/`
+to `eval_sets/<new-id>/` and editing the metadata. The path under
+`eval_sets/` must match `id:` in `eval_set.yaml` (sets may live one
+level deep under a grouping folder such as `acellera-bench/`).
+Everything else, judge, runner, reporter, picks the new set up
+automatically.
 
 ## Adding a new assertion type
 

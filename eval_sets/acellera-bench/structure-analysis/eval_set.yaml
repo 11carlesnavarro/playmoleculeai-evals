@@ -1,0 +1,13 @@
+id: acellera-bench/structure-analysis
+skill_under_test: pmview
+description: |
+  Extracting information from 3D molecular structures: measurements,
+  contacts, pocket/binding-site characterisation, SASA, comparative
+  analyses across structures. Coordinates in, numbers or descriptions
+  out. Cases may also use the viewer for selections/representations
+  where natural, but the primary signal is the analytical result.
+difficulty: mixed
+requires_browser: true
+default_timeout_s: 360
+default_expected_cost_usd: 0.05
+tags: [analysis, geometry, contacts, sasa, pocket, pmview]
