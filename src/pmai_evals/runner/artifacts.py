@@ -87,6 +87,10 @@ class CellPaths:
     def systems_dir(self) -> Path:
         return self.cell_dir / "systems"
 
+    @property
+    def project_files_dir(self) -> Path:
+        return self.cell_dir / "project_files"
+
 
 # --- writer ---------------------------------------------------------------
 
@@ -220,6 +224,23 @@ class RunArtifact(CellPaths):
     def system_files(self) -> list[tuple[str, Path]]:
         """``(logical_name, path)`` per exported structure; [] if none."""
         return self._system_files
+
+    # ---- project files (workspace at end of run) -----------------------
+
+    @cached_property
+    def _project_files(self) -> list[tuple[str, Path]]:
+        root = self.project_files_dir
+        if not root.is_dir():
+            return []
+        return [
+            (str(path.relative_to(root)), path)
+            for path in sorted(root.rglob("*"))
+            if path.is_file()
+        ]
+
+    def project_files(self) -> list[tuple[str, Path]]:
+        """``(relative_path, absolute_path)`` per captured workspace file."""
+        return self._project_files
 
     def load_system(self, name: str) -> Any:
         """Moleculekit ``Molecule`` for the named system. Raises ``KeyError``."""

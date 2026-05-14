@@ -1,16 +1,24 @@
 # Eval set: structure-analysis
 #
-# Scope (in): pulling information out of a 3D structure. Distances,
+# Scope: pulling information out of a 3D structure. Distances,
 # angles, contacts, residues within a cutoff of a ligand or partner
 # chain, pocket characterisation, SASA, geometric comparisons between
 # aligned structures.
 #
-# Scope (out): tasks whose primary output is a transformed structure
-# (alignment, superposition, mutation building) or a pure rendering.
-# Those belong to molecular-visualization.
-#
-# Viewer use: cases may direct the agent to highlight what it has
-# measured. Grading may then check the viewer state in addition to the
-# textual answer, but the analytical result is the load-bearing signal.
 
-cases: []
+cases:
+
+  - id: sa-1187
+    difficulty: easy
+    prompt: |
+      Load PDB 1AQ1. Rank the protein residues within 5 Å of the
+      bound ligand by their number of heavy-atom contacts. Save the ranking as a CSV in your
+      project workspace, with columns `resid` and `contacts`.
+    tags: [contact, pocket, ranking, csv]
+    timeout_s: 360
+    assertions:
+      - type: python_check
+        function: sa1187_contact_counts
+    rubric:
+      enabled: false
+

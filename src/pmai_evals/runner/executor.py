@@ -14,7 +14,11 @@ from pathlib import Path
 from typing import TypeVar
 
 from pmai_evals._io import read_json_or, write_json
-from pmai_evals.browser.project_files import clear_project, upload_to_project
+from pmai_evals.browser.project_files import (
+    clear_project,
+    download_project_files,
+    upload_to_project,
+)
 from pmai_evals.browser.viewer_loader import (
     export_viewer_state,
     list_system_names,
@@ -356,6 +360,17 @@ async def _run_one(
                     await export_viewer_state(chat.page, writer.systems_dir)
             except BrowserError as exc:
                 logger.warning("systems export failed: %s", exc)
+
+            await _soft(
+                "project files fetch",
+                lambda: download_project_files(
+                    chat.page,
+                    writer.project_files_dir,
+                    project=settings.pm_project,
+                    frontend_url=settings.pm_frontend_url,
+                ),
+                0,
+            )
         finally:
             await chat.close()
 

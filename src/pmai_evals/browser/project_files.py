@@ -138,10 +138,15 @@ async def authed_fetch(
 
 
 async def _list_project_entries(
-    page: Page, project: str, frontend_url: str
+    page: Page, project: str, frontend_url: str, *, recursive: bool = False,
 ) -> list[dict[str, Any]]:
-    """Immediate children of ``<project>/`` from the backend, or [] if 404."""
-    url = f"{frontend_url}/v3/files?recursive=false&prefix={project}/"
+    """Children of ``<project>/`` from the backend, or [] if 404.
+
+    With ``recursive=True`` the backend returns the full subtree as a flat
+    listing whose ``name`` entries carry their subpath inside the project.
+    """
+    flag = "true" if recursive else "false"
+    url = f"{frontend_url}/v3/files?recursive={flag}&prefix={project}/"
     try:
         resp = await authed_fetch(page, frontend_url, url, method="GET")
     except Exception as exc:
@@ -188,6 +193,45 @@ async def clear_project(page: Page, *, project: str, frontend_url: str) -> int:
         deleted, len(entries), project,
     )
     return deleted
+
+
+async def download_project_files(
+    page: Page,
+    dest_dir: Path,
+    *,
+    project: str,
+    frontend_url: str,
+) -> int:
+    """Mirror every file under ``<project>/`` into ``dest_dir`` and return the count."""
+    entries = await _list_project_entries(page, project, frontend_url, recursive=True)
+    files = [e for e in entries if not e.get("isDir") and e.get("name")]
+    if not files:
+        return 0
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    downloaded = 0
+    for entry in files:
+        rel = str(entry["name"])
+        url = f"{frontend_url}/v3/file/{project}/{rel}"
+        try:
+            resp = await authed_fetch(page, frontend_url, url, method="GET")
+        except BrowserError as exc:
+            logger.warning("download_project_files: GET %s raised %s", url, exc)
+            continue
+        if not resp.ok:
+            logger.warning(
+                "download_project_files: %s status=%d body=%s",
+                rel, resp.status, await _safe_body(resp, 120),
+            )
+            continue
+        target = dest_dir / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(await resp.body())
+        downloaded += 1
+    logger.info(
+        "downloaded %d/%d project files from %s to %s",
+        downloaded, len(files), project, dest_dir,
+    )
+    return downloaded
 
 
 async def upload_to_project(
