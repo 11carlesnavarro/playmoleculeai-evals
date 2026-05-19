@@ -51,7 +51,7 @@ def _run_python_check(
         logger.exception("python_check %s crashed", func_name)
         return AssertionResult(
             assertion_type=PYTHON_CHECK_TYPE,
-            passed=False,
+            score=0.0,
             evidence=f"{func_name} raised {type(exc).__name__}: {exc}",
             config=config,
         )

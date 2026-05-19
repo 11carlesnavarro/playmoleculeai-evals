@@ -50,26 +50,29 @@ def render_markdown(benchmark: dict[str, Any]) -> str:
     models = sorted(
         benchmark.get("models", []),
         key=lambda m: (
-            -(m.get("assertion_pass_rate_mean") or m.get("assertion_pass_rate") or 0),
+            -(m.get("assertion_score_mean_seed_mean") or m.get("assertion_score_mean") or 0),
             m.get("model", ""),
         ),
     )
     for m in models:
         for s in m.get("seeds") or []:
             cases = f"{s['cases_completed']}/{s['cases_total']}"
-            ar = f"{s['assertions_passed']}/{s['assertions_total']} ({_fmt_pct(s['assertion_pass_rate'])})"
+            ar = (
+                f"{s['assertions_score']:.2f}/{s['assertions_total']} "
+                f"({_fmt_pct(s['assertion_score_mean'])})"
+            )
             rp = f"{s['rubric_pass']}/{s['rubric_total']}" if s["rubric_total"] else "—"
             rm = f"{s['rubric_mean']:.2f}" if s.get("rubric_mean") is not None else "—"
             lines.append(
                 f"| `{m['model']}` | {s['seed']} | {cases} | {ar} | {rp} | {rm} | ${s['cost_usd']:.4f} |"
             )
         if (m.get("n_seeds") or 0) >= 2:
-            ar_summary = _fmt_pct_pm(m.get("assertion_pass_rate_mean"), m.get("assertion_pass_rate_std"))
+            ar_summary = _fmt_pct_pm(
+                m.get("assertion_score_mean_seed_mean"),
+                m.get("assertion_score_mean_seed_std"),
+            )
             rp_summary = _fmt_pct_pm(m.get("rubric_pass_rate_mean"), m.get("rubric_pass_rate_std"))
-            if m.get("rubric_total"):
-                rp_cell = f"**{rp_summary}**"
-            else:
-                rp_cell = "—"
+            rp_cell = f"**{rp_summary}**" if m.get("rubric_total") else "—"
             rm_summary = _fmt_score_pm(m.get("rubric_mean_seed_mean"), m.get("rubric_mean_seed_std"))
             rm_cell = f"**{rm_summary}**" if rm_summary != "—" else "—"
             lines.append(

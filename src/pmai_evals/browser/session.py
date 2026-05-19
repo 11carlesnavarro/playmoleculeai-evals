@@ -1,8 +1,10 @@
 """PMBrowser: async context-managed Playwright wrapper.
 
-One ``PMBrowser`` per (run, model). Owns one ``BrowserContext`` and reuses
-it across cases for that model. Auth is amortized via the storage state
-file produced by ``pmai-evals setup-auth``.
+One ``PMBrowser`` per (run, model). Each ``new_chat`` runs in its own
+fresh ``BrowserContext`` so a per-case auth-token rotation (the project
+download refreshes the token) cannot leak into and wedge later cases.
+Auth is loaded per context from the storage state file produced by
+``pmai-evals setup-auth``.
 """
 
 from __future__ import annotations
@@ -55,9 +57,6 @@ class PMBrowser:
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
-        # The pmview frontend persists the model choice via the ``PMAI_MODEL``
-        # cookie, so we only re-pick when it actually changes.
-        self._selected_model: str | None = None
 
     async def __aenter__(self) -> PMBrowser:
         from playwright.async_api import async_playwright
@@ -70,19 +69,7 @@ class PMBrowser:
         except Exception as exc:
             raise BrowserError(f"failed to launch chromium: {exc}") from exc
 
-        kwargs: dict[str, object] = {}
-        if self._storage_state.exists():
-            kwargs["storage_state"] = str(self._storage_state)
-        else:
-            logger.warning(
-                "no storage_state at %s; you'll need an interactive login flow",
-                self._storage_state,
-            )
-        self._context = await self._browser.new_context(**kwargs)
-        self._context.set_default_navigation_timeout(
-            self._settings.pmai_evals_browser_navigation_timeout_s * 1000
-        )
-        await self._pin_project_cookie()
+        self._context = await self._make_context()
         return self
 
     async def __aexit__(
@@ -108,11 +95,24 @@ class PMBrowser:
         await self._wait_for_auth_cookies(timeout_s=2.0)
 
     async def new_chat(self, *, model: str) -> ChatSession:
-        """Open a fresh page and prepare a new chat for one rollout."""
+        """Open a fresh, isolated context+page and prepare a new chat.
+
+        Each case gets its own ``BrowserContext`` reloaded from the saved
+        storage state. The prior context is closed first, so an auth-token
+        rotation performed during a case (e.g. the project-zip download)
+        stays contained and cannot wedge the next case's agent session.
+        """
         from pmai_evals.browser.chat import ChatSession
 
-        if self._context is None:
+        if self._browser is None:
             raise BrowserError("PMBrowser not entered")
+
+        if self._context is not None:
+            try:
+                await self._context.close()
+            except Exception as exc:
+                logger.warning("previous context close failed: %s", exc)
+        self._context = await self._make_context()
 
         page = await self._context.new_page()
         try:
@@ -123,51 +123,30 @@ class PMBrowser:
 
         chat = ChatSession(page=page, model=model, settings=self._settings)
         await chat.prepare()
-        if self._selected_model != model:
-            await chat.select_model()
-            self._selected_model = model
+        # Contexts are ephemeral, so the PMAI_MODEL cookie never carries
+        # over; always re-pick the model.
+        await chat.select_model()
         return chat
 
     async def login_and_save(self) -> None:
-        """Persist storage state, logging in via the form only if needed.
-
-        Visits ``/login`` and races: if the account button appears the
-        frontend already redirected (existing storage state still valid).
-        Otherwise we drive the email/password flow. ``networkidle`` is
-        intentionally avoided since the pmview SPA polls and never quiesces.
-        """
+        """Drive the email/password form, then persist the resulting cookies."""
         if self._context is None:
             raise BrowserError("PMBrowser not entered")
+        if not (self._settings.pm_email and self._settings.pm_password):
+            raise AuthError("PM_EMAIL / PM_PASSWORD are unset")
 
         page = await self._context.new_page()
         try:
             await page.goto(f"{self._settings.pm_frontend_url}/login")
-            account = page.get_by_role(ACCOUNT_BUTTON[0], name=ACCOUNT_BUTTON[1])
-            email = page.get_by_label(EMAIL_LABEL)
-            tasks = {
-                "account": asyncio.create_task(account.wait_for(timeout=30_000)),
-                "email": asyncio.create_task(email.wait_for(timeout=30_000)),
-            }
-            done, pending = await asyncio.wait(
-                tasks.values(), return_when=asyncio.FIRST_COMPLETED
-            )
-            for task in pending:
-                task.cancel()
-
-            if tasks["account"] in done and tasks["account"].exception() is None:
-                logger.info("already authenticated; refreshing storage state")
-            elif tasks["email"] in done and tasks["email"].exception() is None:
-                if not (self._settings.pm_email and self._settings.pm_password):
-                    raise AuthError("not logged in and PM_EMAIL / PM_PASSWORD are unset")
-                await _type_into_label(page, EMAIL_LABEL, self._settings.pm_email)
-                await _type_into_label(page, PASSWORD_LABEL, self._settings.pm_password)
-                await page.get_by_role(SUBMIT_BUTTON[0], name=SUBMIT_BUTTON[1]).click()
-                try:
-                    await account.wait_for(timeout=30_000)
-                except Exception as exc:
-                    raise AuthError("login did not reach the dashboard") from exc
-            else:
-                raise AuthError(f"neither login form nor dashboard appeared; url={page.url}")
+            await _type_into_label(page, EMAIL_LABEL, self._settings.pm_email)
+            await _type_into_label(page, PASSWORD_LABEL, self._settings.pm_password)
+            await page.get_by_role(SUBMIT_BUTTON[0], name=SUBMIT_BUTTON[1]).click()
+            try:
+                await page.get_by_role(
+                    ACCOUNT_BUTTON[0], name=ACCOUNT_BUTTON[1]
+                ).wait_for(timeout=30_000)
+            except Exception as exc:
+                raise AuthError("login did not reach the dashboard") from exc
 
             await self._wait_for_auth_cookies(timeout_s=10.0)
             self._storage_state.parent.mkdir(parents=True, exist_ok=True)
@@ -200,17 +179,31 @@ class PMBrowser:
             "Run `pmai-evals setup-auth`."
         )
 
-    async def _pin_project_cookie(self) -> None:
-        """Force every page in this context to load ``settings.pm_project``.
+    async def _make_context(self) -> BrowserContext:
+        """Build a fresh context from the saved storage state.
 
-        The frontend reads ``PM_PROJECT`` on mount; without this the saved
-        storage state decides which project gets activated.
+        Project selection is pinned via the ``PM_PROJECT`` cookie (the
+        frontend reads it on mount); without it the storage state decides
+        which project is active.
         """
-        if self._context is None:
+        if self._browser is None:
             raise BrowserError("PMBrowser not entered")
-        await self._context.add_cookies([{
+        kwargs: dict[str, object] = {}
+        if self._storage_state.exists():
+            kwargs["storage_state"] = str(self._storage_state)
+        else:
+            logger.warning(
+                "no storage_state at %s; you'll need an interactive login flow",
+                self._storage_state,
+            )
+        context = await self._browser.new_context(**kwargs)
+        context.set_default_navigation_timeout(
+            self._settings.pmai_evals_browser_navigation_timeout_s * 1000
+        )
+        await context.add_cookies([{
             "name": "PM_PROJECT",
             "value": self._settings.pm_project,
             "url": self._settings.pm_frontend_url,
         }])
-        logger.info("pinned PM_PROJECT=%s for this run", self._settings.pm_project)
+        logger.info("pinned PM_PROJECT=%s", self._settings.pm_project)
+        return context

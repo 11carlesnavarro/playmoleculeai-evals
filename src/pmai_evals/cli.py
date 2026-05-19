@@ -76,6 +76,8 @@ def setup_auth() -> None:
     """One-time interactive login. Saves storage_state.json."""
     settings = _settings()
 
+    settings.auth_state_path.unlink(missing_ok=True)
+
     async def _go() -> None:
         from pmai_evals.browser.session import PMBrowser
 

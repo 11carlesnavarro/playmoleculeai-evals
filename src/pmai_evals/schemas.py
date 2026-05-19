@@ -273,12 +273,12 @@ class RunSummary(BaseModel):
 # --- grading shapes (cross-layer) ----------------------------------------
 
 class AssertionResult(BaseModel):
-    """One assertion's verdict."""
+    """One assertion's verdict, scored on [0, 1]."""
 
     model_config = ConfigDict(extra="forbid")
 
     assertion_type: str
-    passed: bool
+    score: float = Field(ge=0.0, le=1.0)
     evidence: str
     config: dict[str, Any]
 
@@ -304,7 +304,7 @@ class RubricGrade(BaseModel):
 class CaseGradeSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    assertions_passed: int
+    assertions_score: float
     assertions_total: int
     rubric_passed: bool | None = None
 

@@ -6,6 +6,18 @@
 # ``MODEL_PRICE_TIERS`` so eval and dashboard report comparable costs.
 
 models:
+  - id: gpt-5.5
+    provider: openai
+    supports_vision: true
+    tiers:
+      - input_per_mtok_usd: 5.00
+        cached_input_per_mtok_usd: 0.50
+        output_per_mtok_usd: 30.00
+        max_prompt_tokens: 272000
+      - input_per_mtok_usd: 10.00
+        cached_input_per_mtok_usd: 1.00
+        output_per_mtok_usd: 45.00
+
   - id: gpt-5.4
     provider: openai
     supports_vision: true

@@ -1,16 +1,23 @@
-"""Manage project files: list/delete via the backend API, upload via the UI.
+"""Manage project files: list/delete via the backend API, upload and
+download via Chromium so byte streams never round-trip through JS.
 
 List and delete go through the agent backend's ``/v3/file*`` endpoints
 wrapped by :func:`authed_fetch` (auth refresh + transient retry). Uploads
 go through the frontend's hidden ``<input type=file>``, observing the
 resulting PUT responses so silent backend failures surface immediately
 and the call retries instead of timing out on a missing-files poll.
+Downloads request the whole project as a single zip via Chromium's
+native download path; ``APIResponse.body()`` would otherwise serialise
+the bytes into a JS string and trip V8's ``MaxStringLength`` cap.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote
@@ -201,37 +208,70 @@ async def download_project_files(
     *,
     project: str,
     frontend_url: str,
+    timeout_s: float = 600.0,
 ) -> int:
-    """Mirror every file under ``<project>/`` into ``dest_dir`` and return the count."""
+    """Mirror every file under ``<project>/`` into ``dest_dir`` and return the count.
+
+    The whole project is pulled as one zip via ``GET /v3/file/<project>/``
+    (the directory endpoint the backend serves as ``application/zip``),
+    triggered through a synthetic same-origin ``<a download>`` so Chromium
+    streams it straight to disk. ``APIResponse.body()`` would funnel the
+    bytes through a JS string and explode past V8's ~512 MB cap.
+    """
     entries = await _list_project_entries(page, project, frontend_url, recursive=True)
     files = [e for e in entries if not e.get("isDir") and e.get("name")]
     if not files:
         return 0
+
     dest_dir.mkdir(parents=True, exist_ok=True)
-    downloaded = 0
-    for entry in files:
-        rel = str(entry["name"])
-        url = f"{frontend_url}/v3/file/{project}/{rel}"
-        try:
-            resp = await authed_fetch(page, frontend_url, url, method="GET")
-        except BrowserError as exc:
-            logger.warning("download_project_files: GET %s raised %s", url, exc)
-            continue
-        if not resp.ok:
-            logger.warning(
-                "download_project_files: %s status=%d body=%s",
-                rel, resp.status, await _safe_body(resp, 120),
-            )
-            continue
-        target = dest_dir / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(await resp.body())
-        downloaded += 1
-    logger.info(
-        "downloaded %d/%d project files from %s to %s",
-        downloaded, len(files), project, dest_dir,
+    # Long cells outlive the access-token TTL; rotate before the click so
+    # the download request carries a fresh cookie.
+    await _refresh_access_token(
+        page, frontend_url, await _read_csrf_token(page, frontend_url)
     )
-    return downloaded
+
+    url = f"{frontend_url}/v3/file/{project}/"
+    try:
+        async with page.expect_download(timeout=timeout_s * 1000) as info:
+            await page.evaluate(
+                """(href) => {
+                    const a = document.createElement('a');
+                    a.href = href;
+                    a.download = '';
+                    a.rel = 'noopener';
+                    a.style.display = 'none';
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                }""",
+                url,
+            )
+        download = await info.value
+    except Exception as exc:
+        raise BrowserError(f"project zip download failed: {exc}") from exc
+
+    # Keep the archive out of dest_dir so it cannot collide with a real
+    # project file nor survive in the artifact dir if extraction crashes.
+    fd, tmp = tempfile.mkstemp(suffix=".zip", prefix="pmai-project-")
+    archive = Path(tmp)
+    os.close(fd)
+    try:
+        await download.save_as(str(archive))
+        with zipfile.ZipFile(archive) as zf:
+            zf.extractall(dest_dir)
+            extracted = sum(1 for n in zf.namelist() if not n.endswith("/"))
+    except zipfile.BadZipFile as exc:
+        raise BrowserError(
+            f"project archive was not a valid zip: {exc}"
+        ) from exc
+    finally:
+        archive.unlink(missing_ok=True)
+
+    logger.info(
+        "downloaded project %s: %d files extracted to %s (listed %d)",
+        project, extracted, dest_dir, len(files),
+    )
+    return extracted
 
 
 async def upload_to_project(

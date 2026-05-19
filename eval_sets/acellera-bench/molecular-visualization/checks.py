@@ -39,10 +39,10 @@ def _parse_numeric_answer(artifact: RunArtifact) -> float | None:
     return float(match.group(1)) if match else None
 
 
-def _result(passed: bool, evidence: str) -> AssertionResult:
+def _result(score: float | bool, evidence: str) -> AssertionResult:
     return AssertionResult(
         assertion_type=PYTHON_CHECK_TYPE,
-        passed=passed,
+        score=float(score),
         evidence=evidence,
         config={},
     )
@@ -203,7 +203,7 @@ def mv0254_myosin_aligned(
     try:
         mols = {pdb: artifact.load_system(pdb) for pdb in pdbs}
     except KeyError as exc:
-        return _result(False, str(exc))
+        return _result(0.0, str(exc))
     state = artifact.viewer_state()
 
     visibility = [
@@ -254,7 +254,7 @@ def mv1jpz_atoms_highlighted(
         prot = artifact.load_system(_MV1JPZ_PROT)
         oxo = artifact.load_system(_MV1JPZ_OXO)
     except KeyError as exc:
-        return _result(False, str(exc))
+        return _result(0.0, str(exc))
     state = artifact.viewer_state()
     sel = artifact.viewer_selection()
 
@@ -311,7 +311,7 @@ def mv2ity_kinase_domains(
     try:
         mol = artifact.load_system(_MV2ITY_PDB)
     except KeyError as exc:
-        return _result(False, str(exc))
+        return _result(0.0, str(exc))
     state = artifact.viewer_state()
 
     blue_cartoon = _chain_residues(_residues_by_rep(
@@ -354,7 +354,7 @@ def mv3830_rmsd_correct(
     """Pass iff the agent's reported RMSD matches the lowest aligned pose."""
     reported = _parse_numeric_answer(artifact)
     if reported is None:
-        return _result(False, "no <answer>X.XX</answer> tag in final answer")
+        return _result(0.0, "no <answer>X.XX</answer> tag in final answer")
     diff = abs(reported - _MV3830_EXPECTED_A)
     return _result(
         diff <= _MV3830_TOL_A,
@@ -468,7 +468,7 @@ def mv5483_alignment(artifact: RunArtifact, config: dict[str, Any]) -> Assertion
         ref = artifact.load_system(_MV5483_REF)
         mob = artifact.load_system(_MV5483_MOB)
     except KeyError as exc:
-        return _result(False, str(exc))
+        return _result(0.0, str(exc))
     agent, optimal, n = _chain_a_paired_rmsd(mob, ref)
     return _result(
         agent <= _MV5483_RMSD_MAX_A,
@@ -499,8 +499,8 @@ def mv5483_diff_residues_highlighted(
         results.append(_two_set_check(chain_a, must_hit, must_not, name))
     for passed, evidence in results:
         if passed:
-            return _result(True, evidence)
-    return _result(False, "; ".join(ev for _, ev in results))
+            return _result(1.0, evidence)
+    return _result(0.0, "; ".join(ev for _, ev in results))
 
 
 # ---- mv-5499: 8AYF V161C SG-SG distance after agent-driven mutation --------
@@ -543,12 +543,12 @@ def mv5499_distance_correct(
     """Pass iff the agent's reported SG-SG distance matches the structure."""
     found = _find_v161c_sgs(artifact)
     if isinstance(found, str):
-        return _result(False, found)
+        return _result(0.0, found)
     name, mol, ai, bi = found
     actual = float(np.linalg.norm(mol.coords[ai, :, 0] - mol.coords[bi, :, 0]))
     reported = _parse_numeric_answer(artifact)
     if reported is None:
-        return _result(False, "no <answer>X.XX</answer> tag in final answer")
+        return _result(0.0, "no <answer>X.XX</answer> tag in final answer")
     diff = abs(actual - reported)
     return _result(
         diff <= _MV5499_TOL_A,
@@ -614,7 +614,7 @@ def mv8144_interface_highlighted(
     try:
         mol = artifact.load_system(_MV8144_PDB)
     except KeyError as exc:
-        return _result(False, str(exc))
+        return _result(0.0, str(exc))
     hits = _selected_residues(
         artifact.viewer_state(), artifact.viewer_selection(), _MV8144_PDB, mol
     )
@@ -648,7 +648,7 @@ def mv7fab_disulfides(
     try:
         mol = artifact.load_system(_MV7FAB_PDB)
     except KeyError as exc:
-        return _result(False, str(exc))
+        return _result(0.0, str(exc))
     hits = _selected_residues(
         artifact.viewer_state(), artifact.viewer_selection(), _MV7FAB_PDB, mol
     )
@@ -698,18 +698,18 @@ def mv6316_active_site_highlighted(
     try:
         mol = artifact.load_system(_MV6316_PDB)
     except KeyError as exc:
-        return _result(False, str(exc))
+        return _result(0.0, str(exc))
     hits = frozenset(_residues_by_rep(
         artifact.viewer_state(), _MV6316_PDB, mol, types=_STICK_TYPES, color=_BLUE,
     ))
     for label, expected in _MV6316_VALID:
         if hits == expected:
-            return _result(True, f"exact match against {label} (n={len(expected)})")
+            return _result(1.0, f"exact match against {label} (n={len(expected)})")
     diffs = ", ".join(
         f"{label}: missing={len(expected - hits)} extra={len(hits - expected)}"
         for label, expected in _MV6316_VALID
     )
-    return _result(False, f"hit={len(hits)}; {diffs}")
+    return _result(0.0, f"hit={len(hits)}; {diffs}")
 
 
 # ---- mv-6568: POPC/cholesterol membrane composition + ratio ----------------
@@ -729,7 +729,7 @@ def mv6568_membrane_composition(
     try:
         mol = artifact.load_system(_MV6568_SYSTEM)
     except KeyError as exc:
-        return _result(False, str(exc))
+        return _result(0.0, str(exc))
     state = artifact.viewer_state()
 
     pc_truth = _residues_from_mask(mol, mol.atomselect(f"resname {_MV6568_PC_RESNAME}"))

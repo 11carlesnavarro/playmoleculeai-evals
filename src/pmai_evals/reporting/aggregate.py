@@ -25,7 +25,7 @@ class CellAccumulator:
     cases_failed: int = 0
     cases_timed_out: int = 0
     cases_skipped: int = 0
-    assertions_passed: int = 0
+    assertions_score: float = 0.0
     assertions_total: int = 0
     rubric_pass: int = 0
     rubric_total: int = 0
@@ -33,8 +33,8 @@ class CellAccumulator:
     cost_usd: float = 0.0
 
     @property
-    def assertion_pass_rate(self) -> float:
-        return self.assertions_passed / self.assertions_total if self.assertions_total else 0.0
+    def assertion_score_mean(self) -> float:
+        return self.assertions_score / self.assertions_total if self.assertions_total else 0.0
 
     @property
     def rubric_pass_rate(self) -> float:
@@ -59,9 +59,9 @@ class CellAccumulator:
             "cases_failed": self.cases_failed,
             "cases_timed_out": self.cases_timed_out,
             "cases_skipped": self.cases_skipped,
-            "assertions_passed": self.assertions_passed,
+            "assertions_score": round(self.assertions_score, 4),
             "assertions_total": self.assertions_total,
-            "assertion_pass_rate": round(self.assertion_pass_rate, 4),
+            "assertion_score_mean": round(self.assertion_score_mean, 4),
             "rubric_pass": self.rubric_pass,
             "rubric_total": self.rubric_total,
             "rubric_pass_rate": round(self.rubric_pass_rate, 4),
@@ -120,11 +120,11 @@ def aggregate_run(run_dir: Path) -> dict[str, Any]:
         seed = int(grade.get("seed", 0))
         case_id = grade.get("case_id", "?")
         s = grade.get("summary") or {}
-        ap = int(s.get("assertions_passed") or 0)
+        ascore = float(s.get("assertions_score") or 0)
         at = int(s.get("assertions_total") or 0)
         rubric = grade.get("rubric") or None
         for acc in (pooled[model], by_seed[(model, seed)]):
-            acc.assertions_passed += ap
+            acc.assertions_score += ascore
             acc.assertions_total += at
             if rubric:
                 acc.rubric_total += 1
@@ -136,7 +136,7 @@ def aggregate_run(run_dir: Path) -> dict[str, Any]:
         if rubric and isinstance(rubric.get("overall_score"), int | float):
             per_case[case_id]["rubric"][model] = float(rubric["overall_score"])
         per_case[case_id]["models"][model] = {
-            "assertions_passed": ap,
+            "assertions_score": round(ascore, 4),
             "assertions_total": at,
             "rubric_passed": s.get("rubric_passed"),
         }
@@ -148,7 +148,7 @@ def aggregate_run(run_dir: Path) -> dict[str, Any]:
     models_out: list[dict[str, Any]] = []
     for model, acc in pooled.items():
         seeds = seeds_by_model.get(model, [])
-        ar_summary = _seed_summary(seeds, "assertion_pass_rate")
+        as_summary = _seed_summary(seeds, "assertion_score_mean")
         rp_summary = _seed_summary(seeds, "rubric_pass_rate")
         rm_summary = _seed_summary(seeds, "rubric_mean")
         models_out.append({
@@ -156,8 +156,8 @@ def aggregate_run(run_dir: Path) -> dict[str, Any]:
             **acc.to_dict(),
             "n_seeds": len(seeds),
             "seeds": seeds,
-            "assertion_pass_rate_mean": ar_summary["mean"],
-            "assertion_pass_rate_std": ar_summary["std"],
+            "assertion_score_mean_seed_mean": as_summary["mean"],
+            "assertion_score_mean_seed_std": as_summary["std"],
             "rubric_pass_rate_mean": rp_summary["mean"],
             "rubric_pass_rate_std": rp_summary["std"],
             "rubric_mean_seed_mean": rm_summary["mean"],

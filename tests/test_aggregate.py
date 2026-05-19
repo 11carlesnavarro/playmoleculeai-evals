@@ -49,7 +49,7 @@ def _seed_run(run_dir: Path) -> None:
             "assertions": [
                 {
                     "assertion_type": "tool_called",
-                    "passed": passed,
+                    "score": 1.0 if passed else 0.0,
                     "evidence": "...",
                     "config": {"name": "pmview_load"},
                 }
@@ -68,7 +68,7 @@ def _seed_run(run_dir: Path) -> None:
                 "evidence": [],
             },
             "summary": {
-                "assertions_passed": 1 if passed else 0,
+                "assertions_score": 1.0 if passed else 0.0,
                 "assertions_total": 1,
                 "rubric_passed": passed,
             },
@@ -85,8 +85,8 @@ def test_aggregate_and_render(tmp_path: Path) -> None:
 
     benchmark = aggregate_run(run_dir)
     models = {m["model"]: m for m in benchmark["models"]}
-    assert models["model-a"]["assertion_pass_rate"] == 1.0
-    assert models["model-b"]["assertion_pass_rate"] == 0.0
+    assert models["model-a"]["assertion_score_mean"] == 1.0
+    assert models["model-b"]["assertion_score_mean"] == 0.0
     assert models["model-a"]["rubric_pass"] == 1
     assert models["model-b"]["rubric_pass"] == 0
 

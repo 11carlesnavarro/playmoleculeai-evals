@@ -60,7 +60,7 @@ def test_parse_grade_missing_returns_empty() -> None:
 def test_str_verifier_exact_alnum_match_passes() -> None:
     art = _StubArtifact("<answer>Canonical glycolysis</answer>")
     res = checks.bix_str_verifier(art, {"ideal": "canonical-glycolysis"})
-    assert res.passed
+    assert res.score == 1.0
     assert "exact match" in res.evidence
 
 
@@ -69,13 +69,13 @@ def test_str_verifier_partial_match_passes() -> None:
     res = checks.bix_str_verifier(
         art, {"ideal": "Canonical glycolysis pathway", "question": "?"}
     )
-    assert res.passed
+    assert res.score == 1.0
     assert "partial match" in res.evidence
 
 
 def test_str_verifier_missing_answer_fails() -> None:
     res = checks.bix_str_verifier(_StubArtifact("no tag"), {"ideal": "x"})
-    assert not res.passed
+    assert res.score == 0.0
     assert "no <answer>" in res.evidence
 
 
@@ -88,7 +88,7 @@ def test_range_verifier_missing_answer() -> None:
     res = checks.bix_range_verifier(
         _StubArtifact("no tag"), {"ideal": "(0.07,0.08)", "question": "?"}
     )
-    assert not res.passed
+    assert res.score == 0.0
     assert "no <answer>" in res.evidence
 
 
@@ -96,7 +96,7 @@ def test_llm_verifier_missing_answer() -> None:
     res = checks.bix_llm_verifier(
         _StubArtifact("no tag"), {"ideal": "x", "question": "?"}
     )
-    assert not res.passed
+    assert res.score == 0.0
 
 
 @pytest.mark.parametrize(
@@ -110,5 +110,5 @@ def test_llm_verifier_missing_answer() -> None:
 def test_short_circuits_without_api_key(verifier: str, config: dict[str, Any]) -> None:
     art = _StubArtifact("<answer>nowhere-near-the-target</answer>")
     res = getattr(checks, verifier)(art, config)
-    assert not res.passed
+    assert res.score == 0.0
     assert "ANTHROPIC_API_KEY" in res.evidence

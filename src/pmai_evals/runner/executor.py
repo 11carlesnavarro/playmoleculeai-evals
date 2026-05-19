@@ -162,10 +162,17 @@ def _write_record(run_dir: Path, record: RunRecord) -> None:
 
 
 async def _soft(label: str, fn: Callable[[], Awaitable[T]], default: T) -> T:
-    """Run ``fn``; on BrowserError log a warning and return ``default``."""
+    """Run ``fn``; on browser-side failure log a warning and return ``default``.
+
+    Anything thrown by Playwright (timeouts, V8 string-cap on huge bodies,
+    page closed, ...) is best-effort: a single post-run fetch failing must
+    not abort the case before the trace is written.
+    """
+    from playwright.async_api import Error as PWError
+
     try:
         return await fn()
-    except BrowserError as exc:
+    except (BrowserError, PWError) as exc:
         logger.warning("%s failed: %s", label, exc)
         return default
 

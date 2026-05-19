@@ -8,6 +8,6 @@ description: |
   where natural, but the primary signal is the analytical result.
 difficulty: mixed
 requires_browser: true
-default_timeout_s: 360
+default_timeout_s: 600
 default_expected_cost_usd: 0.05
 tags: [analysis, geometry, contacts, sasa, pocket, pmview]

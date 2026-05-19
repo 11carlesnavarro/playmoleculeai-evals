@@ -45,10 +45,10 @@ _GRADE_RE = re.compile(r"<grade>\s*(.*?)\s*</grade>", re.DOTALL)
 _NON_ALNUM_RE = re.compile(r"[^a-zA-Z0-9]")
 
 
-def _result(passed: bool, evidence: str) -> AssertionResult:
+def _result(score: float | bool, evidence: str) -> AssertionResult:
     return AssertionResult(
         assertion_type=PYTHON_CHECK_TYPE,
-        passed=passed,
+        score=float(score),
         evidence=evidence,
         config={},
     )
@@ -125,7 +125,7 @@ def _verify_via_llm(
     target = str(_need(config, "ideal"))
     predicted = _extract_answer(artifact)
     if predicted is None:
-        return _result(False, f"no <answer> tag found; expected {target!r}")
+        return _result(0.0, f"no <answer> tag found; expected {target!r}")
     correct, evidence = _llm_grade(
         question=str(config.get("question") or ""),
         target=target,
@@ -140,15 +140,15 @@ def bix_str_verifier(artifact: RunArtifact, config: dict[str, Any]) -> Assertion
     target = str(_need(config, "ideal"))
     predicted = _extract_answer(artifact)
     if predicted is None:
-        return _result(False, f"no <answer> tag found; expected {target!r}")
+        return _result(0.0, f"no <answer> tag found; expected {target!r}")
 
     cleaned_target = _clean(target)
     cleaned_predicted = _clean(predicted)
     if cleaned_predicted == cleaned_target:
-        return _result(True, f"exact match: predicted={predicted!r}")
+        return _result(1.0, f"exact match: predicted={predicted!r}")
     if cleaned_predicted and cleaned_predicted in cleaned_target:
         return _result(
-            True, f"partial match: predicted={predicted!r} ⊂ target={target!r}"
+            1.0, f"partial match: predicted={predicted!r} ⊂ target={target!r}"
         )
 
     correct, evidence = _llm_grade(

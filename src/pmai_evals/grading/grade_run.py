@@ -111,7 +111,7 @@ async def _grade_one(
                 assertions=[],
                 rubric=None,
                 summary=CaseGradeSummary(
-                    assertions_passed=0,
+                    assertions_score=0.0,
                     assertions_total=len(assertion_specs),
                     rubric_passed=None,
                 ),
@@ -121,7 +121,7 @@ async def _grade_one(
         )
         return True
 
-    passed = sum(1 for r in assertion_results if r.passed)
+    score_sum = sum(r.score for r in assertion_results)
 
     rubric_grade: RubricGrade | None = None
     judge_error: str | None = None
@@ -152,7 +152,7 @@ async def _grade_one(
             assertions=assertion_results,
             rubric=rubric_grade,
             summary=CaseGradeSummary(
-                assertions_passed=passed,
+                assertions_score=score_sum,
                 assertions_total=len(assertion_results),
                 rubric_passed=(rubric_grade.passed if rubric_grade else None),
             ),
@@ -161,11 +161,11 @@ async def _grade_one(
         )
     )
     logger.info(
-        "graded %s/%s/seed-%d: %d/%d assertions passed",
+        "graded %s/%s/seed-%d: score %.2f/%d",
         cell.case_id,
         cell.model,
         cell.seed,
-        passed,
+        score_sum,
         len(assertion_results),
     )
     return True

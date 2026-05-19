@@ -21,7 +21,7 @@ from pmai_evals.schemas import (
 def test_assertion_result_roundtrip() -> None:
     a = AssertionResult(
         assertion_type="output_contains",
-        passed=True,
+        score=1.0,
         evidence="evidence",
         config={"value": "x"},
     )
@@ -36,7 +36,7 @@ def test_case_grade_roundtrip() -> None:
         assertions=[
             AssertionResult(
                 assertion_type="tool_called",
-                passed=True,
+                score=1.0,
                 evidence="ok",
                 config={"name": "pmview_load"},
             )
@@ -55,7 +55,7 @@ def test_case_grade_roundtrip() -> None:
             evidence=["c"],
         ),
         summary=CaseGradeSummary(
-            assertions_passed=1,
+            assertions_score=1.0,
             assertions_total=1,
             rubric_passed=True,
         ),

@@ -23,7 +23,7 @@ def _module_with(*funcs: Callable[..., Any]) -> types.ModuleType:
 def _passing(artifact: RunArtifact, config: dict[str, Any]) -> AssertionResult:
     return AssertionResult(
         assertion_type="python_check",
-        passed=True,
+        score=1.0,
         evidence=f"called with {config['function']}",
         config=config,
     )
@@ -45,7 +45,7 @@ def test_dispatcher_runs_python_check(artifact_with_trace: Any) -> None:
         [{"type": "python_check", "function": "_passing"}],
         checks_module=mod,
     )
-    assert result.passed
+    assert result.score == 1.0
     assert "_passing" in result.evidence
 
 
@@ -99,7 +99,7 @@ def test_python_check_raising_is_a_failure(artifact_with_trace: Any) -> None:
         [{"type": "python_check", "function": "_raising"}],
         checks_module=mod,
     )
-    assert not result.passed
+    assert result.score == 0.0
     assert "RuntimeError" in result.evidence
     assert "boom" in result.evidence
 

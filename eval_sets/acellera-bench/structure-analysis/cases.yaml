@@ -11,14 +11,239 @@ cases:
   - id: sa-1187
     difficulty: easy
     prompt: |
-      Load PDB 1AQ1. Rank the protein residues within 5 Å of the
-      bound ligand by their number of heavy-atom contacts. Save the ranking as a CSV in your
-      project workspace, with columns `resid` and `contacts`.
+      In PDB 1AQ1, rank the protein residues within 5 Å of the bound
+      ligand by their number of heavy-atom contacts. Save the ranking
+      to `contacts.csv` in your project workspace, with columns
+      `resid` and `contacts`.
     tags: [contact, pocket, ranking, csv]
     timeout_s: 360
     assertions:
       - type: python_check
         function: sa1187_contact_counts
+    rubric:
+      enabled: false
+
+  - id: sa-1858
+    difficulty: easy
+    prompt: |
+      List every hydrogen bond between Nirmatrelvir and the protein in
+      PDB 7VH8. Save the result to `hbonds.csv` in your project
+      workspace, with columns
+      `chain,resid,resname,protein_atom,ligand_atom`. One row per
+      hydrogen bond.
+    tags: [hbond, pocket, ligand, csv]
+    timeout_s: null
+    assertions:
+      - type: python_check
+        function: sa1858_hbond_list
+    rubric:
+      enabled: false
+
+  - id: sa-0265
+    difficulty: easy
+    prompt: |
+      Calculate the SASA for every tyrosine residue in PDB 6FSK, and
+      the SASA of the heme pocket (protein residues with any atom
+      within 5 Å of HEM). Save the result to two CSVs in your project
+      workspace, each with columns `chain,resid,sasa_A2`:
+        - `tyr_sasa.csv` with one row per tyrosine residue.
+        - `pocket_sasa.csv` with one row per pocket residue.
+    tags: [sasa, residue, pocket, csv]
+    timeout_s: null
+    assertions:
+      - type: python_check
+        function: sa0265_tyr_sasa
+      - type: python_check
+        function: sa0265_pocket_sasa
+    rubric:
+      enabled: false
+
+  - id: sa-0673
+    difficulty: medium
+    prompt: |
+      In PDB 1IEP (Abl kinase in complex with imatinib, ligand residue
+      name STI), restrict your analysis to chain A. Save two CSVs to
+      your project workspace:
+        - `pocket.csv`: chain A protein residues with any heavy atom
+          within 5 Å of any STI heavy atom. Columns
+          `chain,resid,resname`, one row per residue.
+        - `interactions.csv`: hydrogen bonds and hydrophobic / van der
+          Waals contacts between STI and the chain A protein. Columns
+          `chain,resid,resname,type` where `type` is one of `hbond` or
+          `hydrophobic`. One row per (residue, interaction type) pair.
+          A residue that participates in both classes contributes two
+          rows.
+    tags: [pocket, interaction, hbond, hydrophobic, csv]
+    timeout_s: null
+    assertions:
+      - type: python_check
+        function: sa0673_pocket_residues
+      - type: python_check
+        function: sa0673_hbonds
+      - type: python_check
+        function: sa0673_hydrophobic
+    rubric:
+      enabled: false
+
+  - id: sa-0701
+    difficulty: medium
+    prompt: |
+      In PDB 3ERT, characterise the binding pocket of the bound ligand
+      (residue name OHT) in chain A. Save to your project workspace:
+        - `pocket.csv` (columns `chain,resid,resname`): the chain A
+          protein residues within 5 Å of OHT.
+        - `metrics.csv`, a single data row with columns
+          `center_x,center_y,center_z,res_hydrophobic_fraction,net_formal_charge,closest_resid,closest_dist_A`:
+            - the centroid of OHT's heavy atoms, in Å;
+            - the fraction of pocket residues that are hydrophobic by
+              the Kyte-Doolittle hydropathy index (index > 0);
+            - the pocket's net formal charge;
+            - the pocket residue closest to OHT (its resid) and that
+              minimum residue-to-ligand distance, in Å.
+    tags: [pocket, characterisation, hydrophobicity, charge, geometry, csv]
+    timeout_s: null
+    assertions:
+      - type: python_check
+        function: sa0701_pocket_residues
+      - type: python_check
+        function: sa0701_center
+      - type: python_check
+        function: sa0701_res_hydrophobic_fraction
+      - type: python_check
+        function: sa0701_net_formal_charge
+      - type: python_check
+        function: sa0701_closest_contact
+    rubric:
+      enabled: false
+
+  - id: sa-0192
+    difficulty: medium
+    prompt: |
+      PDB 1ERE and PDB 3ERT are the estrogen receptor ligand-binding
+      domain bound to an agonist and an antagonist. Using chain A of
+      each, quantify the angular difference of helix H12 (residues
+      538-546) between the two structures. Save `h12.csv` to your
+      project workspace, one row, column `angle_deg`.
+    tags: [comparative, helix, angle, conformational-change, csv]
+    timeout_s: null
+    assertions:
+      - type: python_check
+        function: sa0192_h12_angle
+    rubric:
+      enabled: false
+
+  - id: sa-0071
+    difficulty: hard
+    prompt: |
+      A DeepSite pocket-prediction job has already been run on the
+      7Y5K complex; its output is in your project workspace
+      (`7Y5K_prepared.pdb`, `output.csv`, `output.cube`,
+      `output.pdb`). Take DeepSite's highest-scoring predicted pocket
+      and characterise it against `7Y5K_prepared.pdb`. Save to your
+      project workspace:
+        - `pocket.csv`, one data row, columns
+          `center_x,center_y,center_z,host_chain,interface` where the
+          center is DeepSite's predicted pocket center, `host_chain`
+          is the protein chain contributing the most atoms within 6 Å
+          of that center, and `interface` is `yes` if any other
+          protein chain has an atom within 8 Å of the center else
+          `no`.
+        - `pocket_residues.csv` (columns `chain,resid`): the protein
+          residues with any atom within 8 Å of the center.
+        - `marker.pdb`: a single atom placed at the pocket center.
+    tags: [deepsite, pocket, interface, workflow, csv]
+    timeout_s: null
+    preload:
+      project:
+        files:
+          - sa-0071/7Y5K_prepared.pdb
+          - sa-0071/output.csv
+          - sa-0071/output.cube
+          - sa-0071/output.pdb
+    assertions:
+      - type: python_check
+        function: sa0071_center
+      - type: python_check
+        function: sa0071_host_chain
+      - type: python_check
+        function: sa0071_interface
+      - type: python_check
+        function: sa0071_pocket_residues
+      - type: python_check
+        function: sa0071_marker
+    rubric:
+      enabled: false
+
+  - id: sa-0364
+    difficulty: hard
+    prompt: |
+      In PDB 3SPU, restrict your analysis to chain A and characterise
+      the binuclear zinc centre of the metallo-β-lactamase. Save to
+      your project workspace:
+        - `coordination.csv` (columns
+          `zinc,chain,resid,resname,atom,distance_A`): for each of the
+          two zinc ions, every protein or solvent atom within 2.6 Å of
+          it, with its distance to that zinc in Å. Label the two zincs
+          consistently in the `zinc` column (`Zn1` / `Zn2`, in any
+          order). One row per coordinating atom.
+        - `metrics.csv`, one data row, columns
+          `zn_zn_dist_A,bridge_resname,bridge_atom`: the distance
+          between the two zinc ions in Å, and the residue name and
+          atom name of the single atom lying within 2.6 Å of both
+          zincs at once; if no atom bridges both, write `none` for
+          both fields.
+    tags: [metal, coordination, binuclear, geometry, csv]
+    timeout_s: null
+    assertions:
+      - type: python_check
+        function: sa0364_coordination
+      - type: python_check
+        function: sa0364_metrics
+    rubric:
+      enabled: false
+
+  - id: sa-1168
+    difficulty: hard
+    prompt: |
+      In PDB 6OIM, the bound inhibitor is covalently attached to the
+      protein. Identify the covalent linkage and characterise the
+      binding site. Save to your project workspace:
+        - `covalent.csv`, one data row, columns
+          `chain,resid,resname,protein_atom,ligand_atom,bond_length_A`:
+          the protein residue covalently bonded to the inhibitor, the
+          names of the two bonded atoms (protein and ligand), and the
+          bond length in Å.
+        - `pocket.csv` (columns `chain,resid,resname`): the protein
+          residues with any heavy atom within 4 Å of the inhibitor.
+    tags: [covalent, ligand, pocket, geometry, csv]
+    timeout_s: null
+    assertions:
+      - type: python_check
+        function: sa1168_covalent
+      - type: python_check
+        function: sa1168_pocket
+    rubric:
+      enabled: false
+
+  - id: sa-0517
+    difficulty: hard
+    prompt: |
+      PDB 2VT4 is an engineered crystallisation construct of a
+      drug-target receptor. Relative to the wild-type sequence of the
+      same protein from the same organism, the construct carries
+      deliberately introduced point mutations. Identify them. Save to
+      your project workspace `mutations.csv` (columns
+      `resid,wildtype,mutant`): one row per engineered single-residue
+      substitution, where `resid` is the residue number in the
+      wild-type (UniProt) numbering, and `wildtype` and `mutant` are
+      the one-letter amino acids before and after the substitution.
+      Exclude chain truncations, deletions, insertions, expression
+      tags, and any fusion-partner residues.
+    tags: [construct, mutation, sequence, uniprot, reasoning, csv]
+    timeout_s: null
+    assertions:
+      - type: python_check
+        function: sa0517_mutations
     rubric:
       enabled: false
 
