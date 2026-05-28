@@ -152,6 +152,7 @@ class CaseSpec(BaseModel):
     tags: list[str] = Field(default_factory=list)
     preload: PreloadSpec = Field(default_factory=PreloadSpec)
     timeout_s: int | None = None
+    build_wait_s: int | None = None
     expected_cost_usd: float | None = None
     assertions: list[AssertionSpec] = Field(default_factory=list)
     rubric: RubricCaseConfig = Field(default_factory=RubricCaseConfig)
@@ -168,6 +169,8 @@ class EvalSetSpec(BaseModel):
     difficulty: str = "mixed"
     requires_browser: bool = True
     default_timeout_s: int | None = 300
+    default_build_wait_s: int = 0
+    default_job_cap_s: int = 0
     default_expected_cost_usd: float = 0.05
     rubric_path: str | None = None
     tags: list[str] = Field(default_factory=list)

@@ -16,6 +16,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pmai_evals.browser import locators
+from pmai_evals.browser.jobs import (
+    JobsSettleReport,
+    wait_for_jobs_or_cap as _wait_for_jobs_or_cap,
+)
 from pmai_evals.browser.observers import (
     PYODIDE_READY,
     SCREENSHOT_DATA_URI,
@@ -174,6 +178,25 @@ class ChatSession:
             ) from exc
 
         return CompletionStatus.completed
+
+    async def wait_for_jobs_or_cap(
+        self,
+        *,
+        project: str,
+        build_wait_s: int,
+        job_cap_s: int,
+    ) -> JobsSettleReport:
+        """Let backend jobs settle; cap each job at ``job_cap_s`` wall time.
+
+        See :func:`pmai_evals.browser.jobs.wait_for_jobs_or_cap`.
+        """
+        return await _wait_for_jobs_or_cap(
+            page=self._page,
+            frontend_url=self._settings.pm_frontend_url,
+            project=project,
+            build_wait_s=build_wait_s,
+            job_cap_s=job_cap_s,
+        )
 
     # ---- observers ------------------------------------------------------
 

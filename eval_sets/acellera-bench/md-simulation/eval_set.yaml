@@ -1,0 +1,16 @@
+id: acellera-bench/md-simulation
+skill_under_test: md_protocol
+description: |
+  Setup decisions and short-MD sanity for molecular dynamics. Cases
+  exercise the agent's choices on force field, water model, padding,
+  ions, restraints, ligand parameterisation, and membrane composition.
+  After the agent stops, the runner waits for backend jobs to settle
+  and caps each individual job at default_job_cap_s wall time, then
+  grades the built systems and partial MD outputs.
+difficulty: mixed
+requires_browser: true
+default_timeout_s: 1200
+default_build_wait_s: 1800
+default_job_cap_s: 300
+default_expected_cost_usd: 0.10
+tags: [md, setup, system-building, simplerun, restraints, md_protocol]

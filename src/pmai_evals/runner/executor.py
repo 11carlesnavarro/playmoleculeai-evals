@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TypeVar
 
 from pmai_evals._io import read_json_or, write_json
+from pmai_evals.browser.jobs import JobsSettleReport
 from pmai_evals.browser.project_files import (
     clear_project,
     download_project_files,
@@ -350,6 +351,20 @@ async def _run_one(
             status_str = await chat.wait_for_completion(timeout_s=timeout_s)
             chat_id = chat.chat_id
 
+            build_wait_s = case.build_wait_s or eval_set.spec.default_build_wait_s
+            job_cap_s = eval_set.spec.default_job_cap_s
+            settle: JobsSettleReport | None = None
+            if build_wait_s > 0 and job_cap_s > 0:
+                from playwright.async_api import Error as PWError
+                try:
+                    settle = await chat.wait_for_jobs_or_cap(
+                        project=settings.pm_project,
+                        build_wait_s=build_wait_s,
+                        job_cap_s=job_cap_s,
+                    )
+                except (BrowserError, PWError) as exc:
+                    logger.warning("settle phase failed: %s", exc)
+
             history = await _soft("chat history fetch", chat.fetch_history, [])
             viewer_state = await _soft(
                 "viewer state fetch", chat.get_viewer_state, {"_error": "fetch failed"}
@@ -406,6 +421,7 @@ async def _run_one(
             "tool_latency_ms": trace.metrics.tool_latency_ms,
             "cost_usd": cost,
             "trace_status": str(trace.status),
+            "settle": settle.to_dict() if settle is not None else None,
         })
         budget.charge(
             case_id=case.id,
