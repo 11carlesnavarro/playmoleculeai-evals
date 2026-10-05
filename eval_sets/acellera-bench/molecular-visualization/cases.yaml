@@ -11,29 +11,27 @@ cases:
       align the three motors and color each structure with a distinct
       solid color so the three are visually distinguishable.
     tags: [multi-structure, align, filter, color]
-    timeout_s: 600
     assertions:
       - type: python_check
         function: mv0254_myosin_aligned
     rubric:
       enabled: false
 
-  - id: mv-5483
+  - id: mv-1ca2
     difficulty: medium
     prompt: |
-      Show chain A of VRK2 (2V62) aligned to chain A of VRK1 (3OP5),
-      and highlight in blue (#0000FF) ball-and-stick the chain-A
-      residues that differ between them.
+      Show chain A of carbonic anhydrase I (1HCB) aligned to chain A of
+      carbonic anhydrase II (1CA2), and highlight in blue (#0000FF)
+      ball-and-stick the chain-A residues that differ between them.
     tags: [align, compare, highlight]
-    timeout_s: 480
     preload:
       viewer:
-        pdb_ids: ["3OP5", "2V62"]
+        pdb_ids: ["1CA2", "1HCB"]
     assertions:
       - type: python_check
-        function: mv5483_alignment
+        function: mv1ca2_alignment
       - type: python_check
-        function: mv5483_diff_residues_highlighted
+        function: mv1ca2_diff_residues_highlighted
     rubric:
       enabled: false
 
@@ -46,7 +44,6 @@ cases:
       in Ångströms, between <answer>...</answer> tags,
       e.g. <answer>1.40</answer>.
     tags: [docking, rmsd]
-    timeout_s: 480
     preload:
       project:
         files: ["outlig0.sdf"]
@@ -65,7 +62,6 @@ cases:
       SG of B:CYS161). Report the result in Ångströms between
       <answer>...</answer> tags, e.g. <answer>8.39</answer>.
     tags: [mutate, measure]
-    timeout_s: 480
     assertions:
       - type: python_check
         function: mv5499_distance_correct
@@ -79,7 +75,6 @@ cases:
       viewer selection the interface residues on both chains (residues
       with any heavy atom within 5 Å of the partner chain).
     tags: [interface, highlight]
-    timeout_s: 360
     assertions:
       - type: python_check
         function: mv8144_interface_highlighted
@@ -94,7 +89,6 @@ cases:
       cartoon. Highlight the catalytic K745, E762, and D855 as ball-and-stick
       in red (#FF0000).
     tags: [domains, color, catalytic-triad]
-    timeout_s: 360
     assertions:
       - type: python_check
         function: mv2ity_kinase_domains
@@ -111,7 +105,6 @@ cases:
       to cholesterol between <answer>...</answer> tags as a decimal,
       e.g. <answer>2.50</answer>.
     tags: [membrane, lipids, color, count, ratio]
-    timeout_s: 480
     preload:
       project:
         files: ["membrane.pdb"]
@@ -128,7 +121,6 @@ cases:
       (chain A), and the pseudo-oxo point (the atom in pseudo_oxo.pdb)
       using a viewer selection.
     tags: [atom-highlight, p450, selection]
-    timeout_s: 360
     preload:
       viewer:
         pdb_ids: ["1JPZ"]
@@ -145,7 +137,6 @@ cases:
       Load the Fab structure 7FAB. Highlight the cysteine residues
       involved in disulfide bonds using a viewer selection.
     tags: [disulfide, antibody, selection]
-    timeout_s: 360
     assertions:
       - type: python_check
         function: mv7fab_disulfides
@@ -158,7 +149,6 @@ cases:
       Load 6FCX and highlight the active site (the protein residues
       at 6 Å of the ligand SAH) in blue (#0000FF) ball-and-stick.
     tags: [load, active-site, highlight]
-    timeout_s: 360
     assertions:
       - type: python_check
         function: mv6316_active_site_highlighted

@@ -1,0 +1,5 @@
+name,chembl_id,smiles
+guanfacine,CHEMBL862,N=C(N)NC(=O)Cc1c(Cl)cccc1Cl
+guanethidine,CHEMBL765,N=C(N)NCCN1CCCCCCC1
+guanabenz,CHEMBL420,N=C(N)N/N=C/c1c(Cl)cccc1Cl
+guanadrel,CHEMBL1037,N=C(N)NCC1COC2(CCCCC2)O1

@@ -1,0 +1,289 @@
+# Eval set: 3d-reasoning
+#
+# Every file is uploaded to the project workspace. No structure is loaded in
+# the viewer before the prompt. The source identities and answer key are only
+# in fixtures/ground_truth.json, which is not uploaded to the agent.
+
+cases:
+
+  - id: dr-0001
+    difficulty: hard
+    prompt: |
+      The files `receptor.pdb`, `attachment_point.pdb`, and
+      `candidate_A.sdf` through `candidate_D.sdf` are in your project
+      workspace. The four candidate files show the same bound ligand core.
+      They differ only in the placement of a terminal region. The zinc marker
+      in `attachment_point.pdb` marks the attachment point.
+
+      Which candidate best fits the available three dimensional space while
+      it preserves the shared ligand core pose? Reply with one letter inside
+      answer tags, for example `<answer>A</answer>`.
+    tags: [ligand, fragment-placement, pocket-fit]
+    preload:
+      project:
+        files:
+          - dr-0001/receptor.pdb
+          - dr-0001/attachment_point.pdb
+          - dr-0001/candidate_A.sdf
+          - dr-0001/candidate_B.sdf
+          - dr-0001/candidate_C.sdf
+          - dr-0001/candidate_D.sdf
+    assertions:
+      - type: python_check
+        function: answer_choice
+        kwargs: {case_id: dr-0001}
+    rubric:
+      enabled: false
+
+  - id: dr-0002
+    difficulty: hard
+    prompt: |
+      The files `receptor.pdb`, `attachment_point.pdb`, and
+      `candidate_A.sdf` through `candidate_D.sdf` are in your project
+      workspace. The four candidate files have one shared bound ligand core.
+      Their flexible terminal regions extend in four different directions.
+      The zinc marker in `attachment_point.pdb` marks the attachment point.
+
+      Which candidate gives the most plausible extension direction in the
+      protein environment? Reply with one letter inside answer tags, for
+      example `<answer>A</answer>`.
+    tags: [ligand, growth-direction, pocket-fit]
+    preload:
+      project:
+        files:
+          - dr-0002/receptor.pdb
+          - dr-0002/attachment_point.pdb
+          - dr-0002/candidate_A.sdf
+          - dr-0002/candidate_B.sdf
+          - dr-0002/candidate_C.sdf
+          - dr-0002/candidate_D.sdf
+    assertions:
+      - type: python_check
+        function: answer_choice
+        kwargs: {case_id: dr-0002}
+    rubric:
+      enabled: false
+
+  - id: dr-0003
+    difficulty: hard
+    prompt: |
+      The files `receptor.pdb`, `attachment_point.pdb`, and
+      `candidate_A.sdf` through `candidate_D.sdf` are in your project
+      workspace. The four candidate files show the same bound ligand core.
+      One terminal group has four candidate placements next to a defined
+      pocket. The zinc marker in `attachment_point.pdb` marks the attachment
+      point.
+
+      Which candidate best fills the adjacent pocket without disruption of
+      the shared ligand core pose? Reply with one letter inside answer tags,
+      for example `<answer>A</answer>`.
+    tags: [ligand, subpocket, pocket-fit]
+    preload:
+      project:
+        files:
+          - dr-0003/receptor.pdb
+          - dr-0003/attachment_point.pdb
+          - dr-0003/candidate_A.sdf
+          - dr-0003/candidate_B.sdf
+          - dr-0003/candidate_C.sdf
+          - dr-0003/candidate_D.sdf
+    assertions:
+      - type: python_check
+        function: answer_choice
+        kwargs: {case_id: dr-0003}
+    rubric:
+      enabled: false
+
+  - id: dr-0004
+    difficulty: hard
+    prompt: |
+      The files `receptor.pdb`, `attachment_point.pdb`, and
+      `candidate_A.sdf` through `candidate_D.sdf` are in your project
+      workspace. The candidates share one bound ligand core. They place a
+      missing aromatic substituent in four different orientations. The zinc
+      marker in `attachment_point.pdb` marks its attachment point.
+
+      Which orientation is most compatible with the surrounding protein?
+      Reply with one letter inside answer tags, for example
+      `<answer>A</answer>`.
+    tags: [ligand, aromatic-orientation, pocket-fit]
+    preload:
+      project:
+        files:
+          - dr-0004/receptor.pdb
+          - dr-0004/attachment_point.pdb
+          - dr-0004/candidate_A.sdf
+          - dr-0004/candidate_B.sdf
+          - dr-0004/candidate_C.sdf
+          - dr-0004/candidate_D.sdf
+    assertions:
+      - type: python_check
+        function: answer_choice
+        kwargs: {case_id: dr-0004}
+    rubric:
+      enabled: false
+
+  - id: dr-0005
+    difficulty: hard
+    prompt: |
+      The files `receptor.pdb`, `attachment_point.pdb`, and
+      `candidate_A.sdf` through `candidate_D.sdf` are in your project
+      workspace. The candidates share one bound ligand core. A distal
+      aromatic group projects from the marked attachment point in four
+      different ways.
+
+      Which placement is most compatible with the pocket? Reply with one
+      letter inside answer tags, for example `<answer>A</answer>`.
+    tags: [ligand, aromatic-placement, pocket-fit]
+    preload:
+      project:
+        files:
+          - dr-0005/receptor.pdb
+          - dr-0005/attachment_point.pdb
+          - dr-0005/candidate_A.sdf
+          - dr-0005/candidate_B.sdf
+          - dr-0005/candidate_C.sdf
+          - dr-0005/candidate_D.sdf
+    assertions:
+      - type: python_check
+        function: answer_choice
+        kwargs: {case_id: dr-0005}
+    rubric:
+      enabled: false
+
+  - id: dr-0006
+    difficulty: hard
+    prompt: |
+      The files `receptor.pdb`, `attachment_point.pdb`, and
+      `candidate_A.sdf` through `candidate_D.sdf` are in your project
+      workspace. The candidates share one bound ligand core and place a
+      flexible terminal region in four different ways. The zinc marker in
+      `attachment_point.pdb` marks the attachment point.
+
+      Which placement best fits the protein environment? Reply with one
+      letter inside answer tags, for example `<answer>A</answer>`.
+    tags: [ligand, flexible-region, pocket-fit]
+    preload:
+      project:
+        files:
+          - dr-0006/receptor.pdb
+          - dr-0006/attachment_point.pdb
+          - dr-0006/candidate_A.sdf
+          - dr-0006/candidate_B.sdf
+          - dr-0006/candidate_C.sdf
+          - dr-0006/candidate_D.sdf
+    assertions:
+      - type: python_check
+        function: answer_choice
+        kwargs: {case_id: dr-0006}
+    rubric:
+      enabled: false
+
+  - id: dr-0007
+    difficulty: hard
+    prompt: |
+      The files `receptor.pdb`, `attachment_point.pdb`, and
+      `candidate_A.sdf` through `candidate_D.sdf` are in your project
+      workspace. The candidates share one bound ligand core. They place one
+      terminal inhibitor region in four different orientations. The zinc
+      marker in `attachment_point.pdb` marks the attachment point.
+
+      Which candidate reconstructs the most plausible bound ligand? Reply
+      with one letter inside answer tags, for example
+      `<answer>A</answer>`.
+    tags: [ligand, reconstruction, pocket-fit]
+    preload:
+      project:
+        files:
+          - dr-0007/receptor.pdb
+          - dr-0007/attachment_point.pdb
+          - dr-0007/candidate_A.sdf
+          - dr-0007/candidate_B.sdf
+          - dr-0007/candidate_C.sdf
+          - dr-0007/candidate_D.sdf
+    assertions:
+      - type: python_check
+        function: answer_choice
+        kwargs: {case_id: dr-0007}
+    rubric:
+      enabled: false
+
+  - id: dr-0008
+    difficulty: hard
+    prompt: |
+      The files `receptor.pdb` and `region_A.pdb` through `region_D.pdb`
+      are in your project workspace. Each region file contains one zinc
+      marker next to a different receptor surface region.
+
+      Which marked region is the most plausible binding site for an alpha
+      helical peptide partner? Reply with one letter inside answer tags, for
+      example `<answer>A</answer>`.
+    tags: [protein, peptide, surface-recognition]
+    preload:
+      project:
+        files:
+          - dr-0008/receptor.pdb
+          - dr-0008/region_A.pdb
+          - dr-0008/region_B.pdb
+          - dr-0008/region_C.pdb
+          - dr-0008/region_D.pdb
+    assertions:
+      - type: python_check
+        function: answer_choice
+        kwargs: {case_id: dr-0008}
+    rubric:
+      enabled: false
+
+  - id: dr-0009
+    difficulty: hard
+    prompt: |
+      The files `receptor.pdb` and `candidate_A.pdb` through
+      `candidate_D.pdb` are in your project workspace. Each candidate file
+      contains the same alpha helical peptide in a different three
+      dimensional placement near the receptor groove.
+
+      Which helix placement best matches the shape and chemistry of the
+      groove? Reply with one letter inside answer tags, for example
+      `<answer>A</answer>`.
+    tags: [protein, peptide, helix-placement]
+    preload:
+      project:
+        files:
+          - dr-0009/receptor.pdb
+          - dr-0009/candidate_A.pdb
+          - dr-0009/candidate_B.pdb
+          - dr-0009/candidate_C.pdb
+          - dr-0009/candidate_D.pdb
+    assertions:
+      - type: python_check
+        function: answer_choice
+        kwargs: {case_id: dr-0009}
+    rubric:
+      enabled: false
+
+  - id: dr-0010
+    difficulty: hard
+    prompt: |
+      The files `receptor.pdb` and `candidate_A.pdb` through
+      `candidate_D.pdb` are in your project workspace. Each candidate file
+      contains the same protein partner in a different three dimensional
+      orientation at one receptor surface.
+
+      Which candidate forms the most plausible protein interface, with the
+      best surface complementarity and no major chain overlap? Reply with one
+      letter inside answer tags, for example `<answer>A</answer>`.
+    tags: [protein, complex, interface-placement]
+    preload:
+      project:
+        files:
+          - dr-0010/receptor.pdb
+          - dr-0010/candidate_A.pdb
+          - dr-0010/candidate_B.pdb
+          - dr-0010/candidate_C.pdb
+          - dr-0010/candidate_D.pdb
+    assertions:
+      - type: python_check
+        function: answer_choice
+        kwargs: {case_id: dr-0010}
+    rubric:
+      enabled: false

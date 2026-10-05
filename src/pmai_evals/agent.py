@@ -1,0 +1,62 @@
+"""Harbor agent: one PlayMoleculeAI turn with `pmai run`, inside the trial container."""
+
+import shlex
+
+from harbor.agents.installed.base import BaseInstalledAgent, with_prompt_template
+from harbor.agents.options import InstalledAgentOptions
+from pydantic import Field
+
+from pmai_evals import trial
+
+HOME = "/logs/agent/home"  # pmai config home: agent_config.yaml + agent.db, synced to the host
+# Viewer tasks only: the sidecar opens PMView on this project. No sidecar: fails at once.
+OPEN_VIEWER = (
+    'python3 -c "import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=600)" '
+    '"http://viewer:9000/open?project=$(basename "$PWD")" 2>/dev/null'
+)
+
+
+class PmaiOptions(InstalledAgentOptions):
+    pmai_config: str = Field("/opt/pmai-config/default", description="Config folder in the image.")
+    work: str = Field("/app", description="Project folder: the agent's cwd.")
+    flags: str = Field("", description="Extra `pmai run` flags.")
+
+
+class PmaiAgent(BaseInstalledAgent):
+    options_model = PmaiOptions
+
+    @staticmethod
+    def name() -> str:
+        return "pmai"
+
+    async def install(self, environment) -> None:
+        await self.exec_as_agent(environment, command="pmai --help > /dev/null")  # baked in the image
+
+    @with_prompt_template
+    async def run(self, instruction, environment, context) -> None:
+        o = self.options
+        model = (self.model_name or "").split("/")[-1]
+        model_flag = f"--model {shlex.quote(model)}" if model else ""  # none: the config's default
+        await self.exec_as_agent(
+            environment,
+            command=f"""
+set -e
+mkdir -p {HOME} {o.work}
+cp -r {o.pmai_config}/. {HOME}/
+echo {o.work} > /logs/agent/work_dir
+cd {o.work}
+FLAGS="{o.flags}"
+if {OPEN_VIEWER}; then FLAGS="$FLAGS --serve --viewer-id eval"; fi
+pmai run $FLAGS --config {HOME} {model_flag} --output json \\
+  --prompt {shlex.quote(instruction)} > /logs/agent/events.jsonl
+""",
+        )
+
+    def populate_context_post_run(self, context) -> None:
+        db = self.logs_dir / "home" / "agent.db"
+        if db.exists():
+            u = trial.usage(db)
+            context.n_input_tokens = u["input_tokens"]
+            context.n_cache_tokens = u["cached_tokens"]
+            context.n_output_tokens = u["output_tokens"]
+            context.cost_usd = u["cost_usd"]

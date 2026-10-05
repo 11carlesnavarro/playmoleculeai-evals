@@ -20,9 +20,9 @@ checks = cast(
 # --- _find_system --------------------------------------------------------
 
 def test_find_system_case_insensitive() -> None:
-    state = [{"name": "3OP5"}, {"name": "2v62"}]
-    assert checks._find_system(state, "2V62") is state[1]
-    assert checks._find_system(state, "3op5") is state[0]
+    state = [{"name": "1CA2"}, {"name": "1hcb"}]
+    assert checks._find_system(state, "1HCB") is state[1]
+    assert checks._find_system(state, "1ca2") is state[0]
     assert checks._find_system(state, "missing") is None
 
 

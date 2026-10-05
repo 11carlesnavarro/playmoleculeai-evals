@@ -1,0 +1,263 @@
+# Eval set: retrieval-and-selection
+#
+# Scope: locating the right external record and choosing between
+# records. UniProt, RCSB PDB, SIFTS, AlphaFold DB.
+#
+# Every prompt states its own cut-offs, definitions and output columns,
+# so an agent that is right about the science cannot be marked wrong for
+# picking a different convention. Search cases carry a release-date bound
+# that closes the answer set for good; expected values live in
+# fixtures/ground_truth.json and are rebuilt by
+# development/build_retrieval_fixtures.py.
+
+cases:
+
+  - id: rs-uniprot
+    difficulty: easy
+    prompt: |
+      Find the reviewed (Swiss-Prot) UniProtKB entry for the human gene
+      MAOB. Save `target.csv` to your project workspace with the columns
+      `gene,accession,entry_name,sequence_length,residue_397` and exactly
+      one data row:
+        - `accession`: the primary accession.
+        - `entry_name`: the UniProt entry name, for example XXXX_HUMAN.
+        - `sequence_length`: the length of the canonical sequence.
+        - `residue_397`: the one-letter code of residue 397 of the
+          canonical sequence, counting from 1.
+    tags: [uniprot, mapping, csv]
+    assertions:
+      - type: python_check
+        function: rs_uniprot_target
+    rubric:
+      enabled: false
+
+  - id: rs-ligands
+    difficulty: easy
+    prompt: |
+      For PDB entry 2V5Z, list every non-polymer chemical component that
+      is not water. Save `ligands.csv` to your project workspace with the
+      columns `het_code,formula_weight,role`, one row per component.
+        - `het_code`: the PDB chemical component identifier.
+        - `formula_weight`: the formula weight in daltons as reported by
+          the PDB chemical component dictionary.
+        - `role`: write `cofactor` for a component that the enzyme uses
+          as a redox cofactor, and `inhibitor` for the drug-like molecule
+          bound in the active site. Use no other values.
+    tags: [pdb, ligand, chemcomp, csv]
+    assertions:
+      - type: python_check
+        function: rs_ligands_roles
+    rubric:
+      enabled: false
+
+  - id: rs-search
+    difficulty: medium
+    prompt: |
+      Search the PDB for every entry that satisfies all of these
+      conditions at the same time:
+        - it contains a polymer entity mapped to UniProt accession
+          P00918 (human carbonic anhydrase 2),
+        - the experimental method is X-ray diffraction,
+        - the resolution is strictly better than 1.00 Å,
+        - it was first released on or before 31 December 2025.
+      Save `structures.csv` to your project workspace with the columns
+      `pdb_id,resolution`, one row per entry. Report the resolution in
+      ångström.
+    tags: [pdb, search, constraints, csv]
+    assertions:
+      - type: python_check
+        function: rs_search_structures
+    rubric:
+      enabled: false
+
+  - id: rs-select
+    difficulty: medium
+    prompt: |
+      Consider every PDB entry that satisfies all of these conditions at
+      the same time:
+        - it contains a polymer entity mapped to UniProt accession
+          P00918 (human carbonic anhydrase 2),
+        - the experimental method is X-ray diffraction,
+        - the resolution is strictly better than 1.00 Å,
+        - it was first released on or before 31 December 2025.
+      From that set choose one structure with this rule: take the lowest
+      resolution value, and if several entries share that value, take the
+      one whose PDB id comes first in alphabetical order.
+
+      Save `choice.csv` to your project workspace with the columns
+      `pdb_id,resolution,n_candidates`, where `n_candidates` is how many
+      entries matched the four conditions. Also give the PDB id you chose
+      inside `<answer></answer>` tags.
+    tags: [pdb, search, selection, answer-tag, csv]
+    assertions:
+      - type: python_check
+        function: rs_select_choice
+      - type: python_check
+        function: rs_select_answer_tag
+    rubric:
+      enabled: false
+
+  - id: rs-numbering
+    difficulty: medium
+    prompt: |
+      PDB entry 1TTR is human transthyretin. Its residue numbers are not
+      the same as the residue numbers of UniProt entry P02766, because
+      the UniProt sequence still carries the signal peptide.
+
+      Using the SIFTS residue-level mapping for chain A, save
+      `mapping.csv` to your project workspace with the columns
+      `auth_resid,uniprot_resid,residue`, one row for each of these
+      residue numbers as they appear in the PDB entry: 1, 54, 110, 122,
+      127. `residue` is the one-letter code of that residue in the PDB
+      entry.
+
+      The title of 1TTR names a cardiomyopathic point mutation. Give the
+      position of that mutation in UniProt P02766 numbering inside
+      `<answer></answer>` tags.
+    tags: [sifts, numbering, uniprot, answer-tag, csv]
+    preload:
+      viewer:
+        pdb_ids: ["1TTR"]
+    assertions:
+      - type: python_check
+        function: rs_numbering_mapping
+      - type: python_check
+        function: rs_numbering_answer_tag
+    rubric:
+      enabled: false
+
+  - id: rs-identity
+    difficulty: medium
+    prompt: |
+      The files `P24941.fasta` (human CDK2) and `P06493.fasta` (human
+      CDK1) are in your project workspace. Align the two full sequences
+      with a global Needleman-Wunsch alignment, using the BLOSUM62
+      substitution matrix, a gap opening penalty of -11 and a gap
+      extension penalty of -1. Penalise end gaps exactly like internal
+      gaps.
+
+      Save `identity.csv` to your project workspace with the columns
+      `alignment_length,identical_positions,percent_identity`.
+        - `alignment_length`: the number of columns in the alignment.
+        - `identical_positions`: the number of columns where both
+          sequences carry the same amino acid.
+        - `percent_identity`: 100 × identical_positions ÷
+          alignment_length, to 2 decimal places.
+    tags: [alignment, sequence, identity, csv]
+    preload:
+      project:
+        files: ["P24941.fasta", "P06493.fasta"]
+    assertions:
+      - type: python_check
+        function: rs_identity_metrics
+    rubric:
+      enabled: false
+
+  - id: rs-alphafold
+    difficulty: medium
+    prompt: |
+      Human 1-acyl-sn-glycerol-3-phosphate acyltransferase beta (UniProt
+      O15120, gene AGPAT2) has no experimental structure. Retrieve its
+      AlphaFold DB model, version v6, which is the file
+      `AF-O15120-F1-model_v6.pdb`.
+
+      Save `metrics.csv` to your project workspace with the columns
+      `n_residues,mean_plddt,n_below_70`. Take one pLDDT value per
+      residue, read from the B-factor column of that residue's CA atom.
+        - `n_residues`: the number of residues in the model.
+        - `mean_plddt`: the mean of those per-residue values, to 2
+          decimal places.
+        - `n_below_70`: how many residues have pLDDT below 70.
+    tags: [alphafold, plddt, confidence, csv]
+    assertions:
+      - type: python_check
+        function: rs_alphafold_metrics
+    rubric:
+      enabled: false
+
+  - id: rs-chimera
+    difficulty: hard
+    prompt: |
+      PDB entry 3PBL is described as the human dopamine D3 receptor. Its
+      single polymer entity is a chimera: part of the modelled chain does
+      not come from the receptor at all. Work on chain A and save two
+      files to your project workspace.
+
+      `composition.csv`, with the columns
+      `accession,auth_start,auth_end,uniprot_start,uniprot_end`. Write
+      one row for each continuous segment of chain A that maps to a
+      UniProt entry. `auth_start` and `auth_end` must be residue numbers
+      as they appear in the PDB entry itself. They are not the sequential
+      position in the sequence, and the numbering in this entry is not
+      continuous. `uniprot_start` and `uniprot_end` are the matching
+      positions in that UniProt sequence.
+
+      `mutations.csv`, with the columns
+      `accession,uniprot_resid,wild_type,mutant`. Write one row for every
+      position where the construct sequence differs from the canonical
+      UniProt sequence of the segment that position belongs to. Use
+      one-letter codes, and number the position in the UniProt sequence
+      of that segment.
+    tags: [pdb, chimera, sifts, mutations, construct, csv]
+    assertions:
+      - type: python_check
+        function: rs_chimera_composition
+      - type: python_check
+        function: rs_chimera_mutations
+    rubric:
+      enabled: false
+
+  - id: rs-classify
+    difficulty: hard
+    prompt: |
+      For each of these PDB entries find the drug-like ligands: 1AQ1,
+      1IEP, 1TTR, 2V5Z, 3ERT, 3PBL, 4EY7, 6FSK.
+
+      A non-polymer chemical component counts as a drug-like ligand when
+      all of these hold:
+        - it is not water,
+        - its formula weight is 250 Da or more,
+        - its PDB chemical component identifier is not one of: 1PE, 12P,
+          ACT, BME, BMA, CIT, DMS, EDO, EPE, FAD, FMT, GOL, HEM, HEZ,
+          IPA, MAN, MES, MPD, NAD, NAG, P6G, PEG, PG4, PGE, SIA, SUC,
+          TAR, TRS.
+
+      Save `ligand_calls.csv` to your project workspace with the columns
+      `pdb_id,het_code`, one row per drug-like ligand. If an entry has no
+      drug-like ligand, write a single row for it with the literal value
+      `none` in `het_code`. Every one of the eight entries must appear at
+      least once.
+    tags: [pdb, ligand, filtering, judgement, csv]
+    assertions:
+      - type: python_check
+        function: rs_classify_calls
+    rubric:
+      enabled: false
+
+  - id: rs-absent
+    difficulty: hard
+    prompt: |
+      I want to dock antagonists into human proteinase-activated
+      receptor 3 (PAR3, gene F2RL2, UniProt O00254), so I need its
+      experimental structure. Find the PDB entries for this receptor that
+      were first released on or before 31 December 2025 and give me the
+      best one to work with.
+
+      Save `result.csv` to your project workspace with the columns
+      `n_structures,best_pdb_id,alternative`.
+        - `n_structures`: how many PDB entries match.
+        - `best_pdb_id`: the PDB id you would use. If no entry matches,
+          write the literal value `none`.
+        - `alternative`: if no entry matches, name the closest structural
+          model I could use instead. Otherwise write the literal value
+          `none`.
+      Also give the number of matching PDB entries inside
+      `<answer></answer>` tags.
+    tags: [pdb, grounding, honesty, trap, answer-tag, csv]
+    assertions:
+      - type: python_check
+        function: rs_absent_result
+      - type: python_check
+        function: rs_absent_answer_tag
+    rubric:
+      enabled: false

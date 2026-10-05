@@ -1,0 +1,11 @@
+id: acellera-bench/3d-reasoning
+skill_under_test: pmview
+description: |
+  Spatial reasoning over anonymized molecular structures. Each case gives
+  coordinate files in the project workspace and asks the agent to select one
+  exact candidate placement. No file starts in the molecular viewer.
+difficulty: hard
+requires_browser: true
+default_timeout_s: null
+default_expected_cost_usd: 0.08
+tags: [viewer, spatial-reasoning, ligand, protein, complex, pmview]

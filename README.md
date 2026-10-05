@@ -1,68 +1,73 @@
 # playmoleculeai-evals
 
-Evals for the playmoleculeAI agentic system. Browser-driven, multi-LLM,
-with deterministic assertions *and* rubric-based LLM-as-judge grading.
+Evals for PlayMoleculeAI. [Harbor](https://github.com/laude-institute/harbor) starts one container per case, `pmai run` drives the chat inside it, and pytest grades what is left.
 
-Docs live in [`docs/`](docs/):
-
-- [`how-it-works.md`](docs/how-it-works.md): pipeline tour. Start here.
-- [`writing-evals.md`](docs/writing-evals.md): authoring guide for new cases and eval sets.
-- [`SPEC.md`](docs/SPEC.md): what the harness must do and the shape of its outputs.
-
-## Install
-
-```bash
-uv sync
-uv run playwright install chromium
-cp .env.example .env && $EDITOR .env
-uv run pmai-evals setup-auth          # one-time login, saves storage_state.json
+```text
+harbor run ──► trial container (pmai-eval image)
+                 ├─ pmai run --prompt "<instruction.md>"   tools run here, local backend
+                 ├─ /logs/agent/home/agent.db              trace, production schema
+                 └─ /tests/test.sh ──► pytest ──► /logs/verifier/reward.json
 ```
 
-## Run an eval
-
-Three commands: `run` executes the agent and collects artifacts,
-`grade` scores them, `report` renders the result.
+## Run
 
 ```bash
-# Dry-run first to validate the matrix.
-uv run pmai-evals run --eval-set acellera-bench/molecular-visualization --case mv-5483 --models gpt-5.4-mini --dry-run
-
-# Real run, grade, report.
-uv run pmai-evals run    --eval-set acellera-bench/molecular-visualization --case mv-5483 --models gpt-5.4-mini
-uv run pmai-evals grade  <run_id>
-uv run pmai-evals report <run_id>
-
-# Or chain them in one shot (--auto-report implies --auto-grade):
-uv run pmai-evals run --eval-set acellera-bench/molecular-visualization --case mv-5483 --models gpt-5.4-mini --auto-report
+cp .env.example .env              # add the keys
+make image                        # pmai-eval:latest (needs Docker and ../playmoleculeAI)
+make run JOB=experiments/smoke.yaml
+make view                         # results in jobs/
 ```
 
-`--models` is required and accepts a comma-separated list of model ids
-from the registry (`uv run pmai-evals list-models`).
+## Layout
 
-`<run_id>` is the directory name under `runs/`, printed at the end of
-`run`. Re-grading is free and re-runnable; re-running the agent is not.
+```text
+image/Dockerfile                  sandbox image + pmai (/opt/pmai) + grader (/opt/grader)
+config/<name>/agent_config.yaml   pmai configs, baked at /opt/pmai-config
+src/pmai_evals/agent.py           the Harbor agent (host side)
+src/pmai_evals/trial.py           what a test asks about a trial: answer, tool calls, cost
+src/pmai_evals/reward.py          pytest plugin: one score per test, reward = mean
+src/pmai_evals/judge.py           LLM judge for what code cannot check
+tasks/<set>/<case>/               the cases: instruction.md, task.toml, environment/, tests/
+experiments/*.yaml                Harbor job files: datasets x agents x models
+eval_sets/                        the old case format, kept for the port (phase 2)
+docs/implementation-plan.md       the work list, phase by phase
+```
 
-## CLI
+## A case
 
-| Command | Purpose |
-|---|---|
-| `setup-auth` | Interactive login, saves `playwright/.auth/storage_state.json`. |
-| `run`        | Execute the `(case × model × seed)` matrix; write artifacts under `runs/<run_id>/`. |
-| `grade`      | Grade an existing run (assertions + LLM judge). Re-runnable with `--force`. |
-| `report`     | Render markdown / HTML / JSON summaries from a graded run. |
-| `critique`   | "Grade the grader": flag non-discriminating rubric dimensions. |
-| `list-models`| Print the model registry. |
+```text
+tasks/smoke/hello-file/
+├── instruction.md        the user prompt
+├── task.toml             image, timeouts, network
+├── environment/          input files (Dockerfile FROM pmai-eval:latest + COPY), else .gitkeep
+└── tests/
+    ├── test.sh           PYTHONPATH=/opt exec /opt/grader/bin/pytest /tests -q -p pmai_evals.reward
+    └── test_case.py
+```
 
-Exit codes: `0` success, `1` user error, `2` budget abort, `3`
-unrecoverable harness error.
+```python
+from pmai_evals import trial
+from pmai_evals.judge import judge
 
-## Adding evals
 
-See [`docs/writing-evals.md`](docs/writing-evals.md). No code changes
-needed for a typical new case — it's YAML plus optional fixtures.
+def test_file():
+    assert (trial.WORK / "hello.txt").read_text().strip() == "hello from pmai"
 
-## Repo layout
 
-Code lives under `src/pmai_evals/`, eval data under `eval_sets/`, run
-outputs under `runs/` (gitignored). The contract those outputs must
-satisfy is in [`docs/SPEC.md`](docs/SPEC.md).
+def test_answer_is_clear():
+    assert judge("Says that the file exists.", text=trial.answer())
+```
+
+## Grade a hand run (no Docker)
+
+`trial.py` reads `$TRIAL_LOGS` (default `/logs/agent`), so a test can run against a local `pmai run`:
+
+```bash
+mkdir -p /tmp/t/logs/home /tmp/t/app && cp config/default/agent_config.yaml /tmp/t/logs/home/
+echo /tmp/t/app > /tmp/t/logs/work_dir
+# PMAI_HOME: a source checkout of pmai else takes it from playmoleculeAI/.env
+(cd /tmp/t/app && PMAI_HOME=/tmp/t/logs/home pmai run --config /tmp/t/logs/home --model gpt-6-luna \
+  --output json --prompt "$(cat tasks/smoke/hello-file/instruction.md)" > /tmp/t/logs/events.jsonl)
+TRIAL_LOGS=/tmp/t/logs REWARD_JSON=/tmp/t/reward.json \
+  uv run pytest tasks/smoke/hello-file/tests -q -p pmai_evals.reward && cat /tmp/t/reward.json
+```

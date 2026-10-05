@@ -11,7 +11,12 @@ This skill teaches you to read that DB directly with `sqlite3` and SQL. No wrapp
 
 ## Where the database lives
 
-The canonical layout is `<data_root>/data/databases/<env>/agent.db` where `<env>` is typically `dev`, `prod`, or `open`. Exact `<data_root>` is machine-specific, if you don't know it, ask the user or `find <data_root> -name agent.db`.
+The canonical layout is `<data_root>/data/databases/<env>/agent.db` where `<env>` is typically `dev`, `prod`, or `open`. On this machine `<data_root>` is `/fast_shared/users/carles/data/playmoleculeAIdata`, so:
+
+- prod: `/fast_shared/users/carles/data/playmoleculeAIdata/data/databases/prod/agent.db`
+- open: `/fast_shared/users/carles/data/playmoleculeAIdata/data/databases/open/agent.db`
+
+For any other database, ask the user for the `data_root` rather than searching the filesystem for it.
 
 Open the DB read-only so analysis can never corrupt the source:
 

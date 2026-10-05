@@ -16,7 +16,6 @@ cases:
       to `contacts.csv` in your project workspace, with columns
       `resid` and `contacts`.
     tags: [contact, pocket, ranking, csv]
-    timeout_s: 360
     assertions:
       - type: python_check
         function: sa1187_contact_counts
@@ -32,7 +31,6 @@ cases:
       `chain,resid,resname,protein_atom,ligand_atom`. One row per
       hydrogen bond.
     tags: [hbond, pocket, ligand, csv]
-    timeout_s: null
     assertions:
       - type: python_check
         function: sa1858_hbond_list
@@ -49,7 +47,6 @@ cases:
         - `tyr_sasa.csv` with one row per tyrosine residue.
         - `pocket_sasa.csv` with one row per pocket residue.
     tags: [sasa, residue, pocket, csv]
-    timeout_s: null
     assertions:
       - type: python_check
         function: sa0265_tyr_sasa
@@ -74,7 +71,6 @@ cases:
           A residue that participates in both classes contributes two
           rows.
     tags: [pocket, interaction, hbond, hydrophobic, csv]
-    timeout_s: null
     assertions:
       - type: python_check
         function: sa0673_pocket_residues
@@ -101,7 +97,6 @@ cases:
             - the pocket residue closest to OHT (its resid) and that
               minimum residue-to-ligand distance, in Å.
     tags: [pocket, characterisation, hydrophobicity, charge, geometry, csv]
-    timeout_s: null
     assertions:
       - type: python_check
         function: sa0701_pocket_residues
@@ -125,7 +120,6 @@ cases:
       538-546) between the two structures. Save `h12.csv` to your
       project workspace, one row, column `angle_deg`.
     tags: [comparative, helix, angle, conformational-change, csv]
-    timeout_s: null
     assertions:
       - type: python_check
         function: sa0192_h12_angle
@@ -152,7 +146,6 @@ cases:
           residues with any atom within 8 Å of the center.
         - `marker.pdb`: a single atom placed at the pocket center.
     tags: [deepsite, pocket, interface, workflow, csv]
-    timeout_s: null
     preload:
       project:
         files:
@@ -193,7 +186,6 @@ cases:
           zincs at once; if no atom bridges both, write `none` for
           both fields.
     tags: [metal, coordination, binuclear, geometry, csv]
-    timeout_s: null
     assertions:
       - type: python_check
         function: sa0364_coordination
@@ -216,7 +208,6 @@ cases:
         - `pocket.csv` (columns `chain,resid,resname`): the protein
           residues with any heavy atom within 4 Å of the inhibitor.
     tags: [covalent, ligand, pocket, geometry, csv]
-    timeout_s: null
     assertions:
       - type: python_check
         function: sa1168_covalent
@@ -240,10 +231,8 @@ cases:
       Exclude chain truncations, deletions, insertions, expression
       tags, and any fusion-partner residues.
     tags: [construct, mutation, sequence, uniprot, reasoning, csv]
-    timeout_s: null
     assertions:
       - type: python_check
         function: sa0517_mutations
     rubric:
       enabled: false
-

@@ -1,36 +1,23 @@
-# env / secrets
+# secrets
 .env
-.env.local
 
-# auth + browser state
-playwright/.auth/
-playwright/.cache/
-
-# run artifacts
-runs/
-development/
-
-# BixBench capsule data: large, reproducible via scripts/fetch_bixbench.py
-eval_sets/bixbench/fixtures/*/
-eval_sets/bixbench-verified/fixtures/*/
+# personal tooling (tracked skills stay tracked)
+.claude
+.codex
 
 # python
 __pycache__/
 *.py[cod]
-*.egg-info/
 .venv/
-.mypy_cache/
 .pytest_cache/
 .ruff_cache/
-.pyright/
-build/
+
+# build: pmai wheel for the image
 dist/
 
-# uv
-uv.lock.bak
+# harbor results
+jobs/
 
-# editors
-.vscode/
-.idea/
-*.swp
-.DS_Store
+# BixBench capsule data: large
+eval_sets/bixbench/fixtures/*/
+eval_sets/bixbench-verified/fixtures/*/
