@@ -3,8 +3,11 @@
 import json
 import os
 import re
+import shutil
 import sqlite3
+import tempfile
 import urllib.request
+from functools import cache
 from pathlib import Path
 
 LOGS = Path(os.environ.get("TRIAL_LOGS", "/logs/agent"))  # set it to grade a hand run on the host
@@ -14,8 +17,21 @@ WORK = Path(_work.read_text().strip()) if _work.exists() else Path("/app")
 VIEWER = "http://viewer:9000"
 
 
+@cache
+def _readable(db: Path) -> Path:
+    """agent.db is in WAL mode, so a reader must create agent.db-shm next to it. On the host, the files
+    from the container can belong to nobody (NFS root squash): then read a copy."""
+    if os.access(db.parent, os.W_OK):
+        return db
+    tmp = Path(tempfile.mkdtemp(prefix="trial-db-"))
+    for f in (db, db.with_name(db.name + "-wal")):  # the WAL holds what a killed agent did not checkpoint
+        if f.exists():
+            shutil.copy(f, tmp)
+    return tmp / db.name
+
+
 def q(sql: str, *args, db: Path | None = None) -> list[tuple]:
-    con = sqlite3.connect(f"file:{db or DB}?mode=ro", uri=True)
+    con = sqlite3.connect(f"file:{_readable(db or DB)}?mode=ro", uri=True)
     try:
         return con.execute(sql, args).fetchall()
     finally:

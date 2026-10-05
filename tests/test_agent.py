@@ -25,6 +25,7 @@ def test_script(tmp_path):
     assert "--config /logs/agent/home --model gpt-6-luna --output json" in s
     assert shlex.quote("it's a 'quoted' prompt") in s
     assert s.rstrip().endswith("> /logs/agent/events.jsonl")
+    assert "trap 'chmod -R a+rwX /logs/agent' EXIT" in s
 
 
 def test_no_model(tmp_path):
@@ -44,3 +45,16 @@ def test_context(tmp_path):
     PmaiAgent(logs_dir=tmp_path).populate_context_post_run(ctx)
     assert (ctx.n_input_tokens, ctx.n_cache_tokens, ctx.n_output_tokens, ctx.cost_usd) == (10, 4, 3, 0.25)
     assert json.loads(json.dumps(vars(ctx)))  # plain numbers, as Harbor stores them
+
+
+def test_context_never_raises(tmp_path):
+    """Harbor calls the hook before the verifier: an error there would stop the trial."""
+    (tmp_path / "home").mkdir()
+    (tmp_path / "home" / "agent.db").write_text("not a database")
+
+    class Ctx:
+        pass
+
+    ctx = Ctx()
+    PmaiAgent(logs_dir=tmp_path).populate_context_post_run(ctx)
+    assert not vars(ctx)

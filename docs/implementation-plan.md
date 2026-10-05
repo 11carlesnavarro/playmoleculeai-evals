@@ -47,7 +47,8 @@ playmoleculeai-evals/
 ## Status (2026-10-05)
 
 - Phases 0 and 1 are done. The files are the reference. The two sections below give only the changes from the first plan and the checks.
-- `make image`, `make run` and `make view` work: the smoke job gets its reward in Docker with Harbor (checked by the user on 2026-10-05).
+- `make image`, `make run` and `make view` work (run by the user as `slurmweb`, 2026-10-05). The first smoke trial got no reward:
+  the `.env` OpenAI key is archived (401), and then `populate_context_post_run` crashed on the read only `agent.db`, which stopped the trial before the verifier. Both causes are known; the crash is fixed. Run the smoke job again with a working key.
 - The old harness is removed. All of it is in `/fast_shared/users/carles/data/playmoleculeAIdata/evals-archive-2026-10-05/`:
   - `repo-before-cleanup.tar.gz`: the repo before the cleanup (old src, tests, scripts, mining, development, docs, playwright). Not in it: `.env`, `playwright/.auth`, `.venv`, `.git`, bixbench fixtures.
   - `runs/`: the old run results (34 GB), the baseline for phase 2.
@@ -66,7 +67,7 @@ Changes from the first plan:
 
 Checked: `uv run harbor --version` prints 0.24.0. `make -n` for all targets.
 
-## Phase 1. Walking skeleton (done)
+## Phase 1. Walking skeleton (done, smoke reward in Docker still to see)
 
 Files: `config/default/agent_config.yaml`, `image/Dockerfile`, `src/pmai_evals/{agent,trial,reward,judge}.py`, `tasks/smoke/hello-file/`, `experiments/smoke.yaml`, `tests/`.
 
@@ -76,6 +77,7 @@ Changes from the first plan:
 - `trial.py`: `TRIAL_LOGS` (default `/logs/agent`) sets the folder of `home/agent.db` and `work_dir`. With it, the task tests grade a hand run on the host (see the README).
 - `judge.py`: the request streams, with adaptive thinking. An empty answer is FAIL.
 - `experiments/smoke.yaml`: `${ANTHROPIC_API_KEY:-}`. Harbor stops the job when a `${VAR}` is not set `[checked]`, and the smoke task has no judge.
+- On the host, the trial files from the container belong to `nobody` (NFS root squash). `agent.db` is in WAL mode, so a reader must create `agent.db-shm`: `trial.q` reads a copy when the folder is read only. The agent script makes `/logs/agent` writable on exit, so the host user can delete `jobs/`. `populate_context_post_run` never raises: Harbor calls it before the verifier.
 - Unit tests: also `test_agent.py` (the script and `populate_context_post_run`) and `test_judge.py` (a fake client). `test_reward.py` also checks that a setup error gives 0.
 
 Checked:

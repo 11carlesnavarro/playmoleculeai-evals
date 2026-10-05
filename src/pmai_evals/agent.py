@@ -41,6 +41,8 @@ class PmaiAgent(BaseInstalledAgent):
             environment,
             command=f"""
 set -e
+# also when pmai fails: the host user can then read agent.db and delete the trial folder
+trap 'chmod -R a+rwX /logs/agent' EXIT
 mkdir -p {HOME} {o.work}
 cp -r {o.pmai_config}/. {HOME}/
 echo {o.work} > /logs/agent/work_dir
@@ -54,8 +56,12 @@ pmai run $FLAGS --config {HOME} {model_flag} --output json \\
 
     def populate_context_post_run(self, context) -> None:
         db = self.logs_dir / "home" / "agent.db"
-        if db.exists():
-            u = trial.usage(db)
+        try:
+            u = trial.usage(db) if db.exists() else None
+        except Exception as exc:  # Harbor calls this before the verifier: an error here stops the trial
+            self.logger.warning(f"no usage from {db}: {exc!r}")
+            u = None
+        if u:
             context.n_input_tokens = u["input_tokens"]
             context.n_cache_tokens = u["cached_tokens"]
             context.n_output_tokens = u["output_tokens"]
