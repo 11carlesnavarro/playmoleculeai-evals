@@ -51,7 +51,7 @@ playmoleculeai-evals/
 - Phase 2: 40 tasks ported, and the port gives the old scores on 480 old trials. In Docker, `acellera-sample` (one case per set, gpt-6-luna) gave reward 1.0 on 4 of 4 trials, for less than $0.01.
 - `make image`, `make run` and `make view` work (run by the user as `slurmweb`, 2026-10-05). The first smoke trial got no reward:
   the `.env` OpenAI key is archived (401), and then `populate_context_post_run` crashed on the read only `agent.db`, which stopped the trial before the verifier. Both causes are known; the crash is fixed. Run the smoke job again with a working key.
-- Phase 3: two matrix jobs (`sa-models`, `skills-ab`), checked without Docker. The image now has the skills (it had none before). To run: `make image`, then the two jobs.
+- Phase 3: done. `sa-models` and `skills-ab` ran in Docker (results in the phase 3 section). The image now has the skills (it had none before).
 - Phase 4: `scripts/eval_account.py`. The old harness account logs in on the dev backend, but it is a personal account (`carles`). A dedicated eval account needs the user's choice of email.
 - The old harness is removed. All of it is in `/fast_shared/users/carles/data/playmoleculeAIdata/evals-archive-2026-10-05/`:
   - `repo-before-cleanup.tar.gz`: the repo before the cleanup (old src, tests, scripts, mining, development, docs, playwright). Not in it: `.env`, `playwright/.auth`, `.venv`, `.git`, bixbench fixtures.
@@ -163,9 +163,9 @@ bixbench: later. Its fixtures are 16 GB and 5.8 GB. Do not copy them into tasks:
 
 ---
 
-## Phase 3. The matrix (done, to run in Docker)
+## Phase 3. The matrix (done)
 
-Files: `config/no-skills/`, `experiments/{sa-models,skills-ab}.yaml`, the `skills` and `reasoning_effort` options and `label()` in `src/pmai_evals/agent.py`, the skills in `image/Dockerfile` and `make image`.
+Files: `config/no-skills/`, `experiments/{sa-models,skills-ab}.yaml`, the `reasoning_effort` option and the arm label (`to_agent_info`) in `src/pmai_evals/agent.py`, the skills in `image/Dockerfile` and `make image`.
 
 ```text
 config/
@@ -176,28 +176,40 @@ config/
 | Job | Arms (label in `make view`) | Trials |
 |---|---|---|
 | `experiments/sa-models.yaml` | `pmai-effort-xhigh` gpt-6-luna, `pmai-effort-xhigh` glm-5.3-flash, `pmai-effort-low` gpt-6-luna | 30 |
-| `experiments/skills-ab.yaml` | `pmai` (image skills), `pmai-skills-next` (acellera-skills checkout), `pmai-no-skills`; all gpt-6-luna | 30 |
+| `experiments/skills-ab.yaml` | `pmai` (image skills), `pmai-no-skills`; both gpt-6-luna | 20 |
 
 Changes from the first plan:
 - `n_attempts: 1`, no `job_name` (`make run` names each job). pass@3 is a `make run` with `n_attempts: 3` when a result needs it.
-- The image had no skills: the sandbox image is built with `SKILLS=none`, and no `SKILL.md` reached the agent in the phase 2 trials `[checked]`. `make image` now puts `acellera-skills/skills` at `SKILLS_REF` (default `main`, as the production agent image) in `/home/.pmai/skills`, and prints the skills commit. It does not take the checkout: `skills-ab` mounts the checkout as the next arm. `PMAI_HOME=/home/.pmai` is the org skills folder of the skills plugin `[checked]`.
-- Skills A/B does not set `PMAI_HOME` to the mount: `PMAI_HOME` also holds the config and `agent.db`. The agent option `skills: /opt/skills-next` replaces `$PMAI_HOME/skills` with the mounted folder before `pmai run`. The nested acellera-skills layout works: a host run listed 21 skills `[checked]`. Harbor's own `skills:` field does not: it wants `SKILL.md` in each child folder `[checked]`.
+- The image had no skills: the sandbox image is built with `SKILLS=none`, and no `SKILL.md` reached the agent in the phase 2 trials `[checked]`. `make image` now puts `acellera-skills/skills` at `SKILLS_REF` (default `main`, as the production agent image) in `/home/.pmai/skills`, and prints the skills commit. `PMAI_HOME=/home/.pmai` is the org skills folder of the skills plugin `[checked]`.
+- No arm for a skills branch: the first plan mounted an acellera-skills checkout as a third arm. The checkout is on `main`, the same as the image, so the arm tested nothing and is removed (code in commit 2686b68: an agent option that replaced `$PMAI_HOME/skills` with a mounted folder). Harbor's own `skills:` field does not work for this: it wants `SKILL.md` in each child folder `[checked]`.
 - Reasoning effort is the agent option `reasoning_effort`, not a config folder: the script sets `reasoning.effort` in the copied config. Harbor's viewer reads this kwarg and shows a "Reasoning effort" column on the job page `[checked]`.
-- Harbor's job summary groups the results by `agent_info.name` + model, and the viewer shows the job file `name`. The agent sets `agent_info.name`: `pmai`, then the config folder if it is not `default`, then the skills folder, then `effort-<level>`. A test checks that each job file `name` is the same.
+- Harbor's job summary groups the results by `agent_info.name` + model, and the viewer shows the job file `name`. The agent sets `agent_info.name`: `pmai`, then the config folder if it is not `default`, then `effort-<level>`. A test checks that each job file `name` is the same.
 - `sa-models` needs `FIREWORKS_API_KEY` (glm-5.3-flash). In `skills-ab` it is optional (`${FIREWORKS_API_KEY:-}`).
 
-Checked without Docker: pmai loads the configs, Harbor loads both job files, the labels resolve, unit tests for the label, the skills and effort options, and `no-skills` = `default` without the skills plugin.
+Checked without Docker: pmai loads the configs, Harbor loads both job files, the labels resolve, unit tests for the label, the effort option, and `no-skills` = `default` without the skills plugin.
 
 To run (each job less than $1):
 
 ```bash
 make image                                   # again: the image now has the skills
 make run JOB=experiments/sa-models.yaml      # needs FIREWORKS_API_KEY in .env
-make run JOB=experiments/skills-ab.yaml      # check out the acellera-skills branch to test first
+make run JOB=experiments/skills-ab.yaml
 make view
 ```
 
 **Done when:** `harbor view` shows the arms side by side with reward, tokens and cost.
+
+Result (2026-10-06, 1 attempt per task):
+
+| Job | Arm | Mean reward | Cost |
+|---|---|---|---|
+| sa-models | `pmai-effort-xhigh` gpt-6-luna | 0.75 | $0.08 |
+| sa-models | `pmai-effort-xhigh` glm-5.3-flash | 0.69 (2 timeouts at 1800 s) | $0.34 |
+| sa-models | `pmai-effort-low` gpt-6-luna | 0.68 | $0.06 |
+| skills-ab | `pmai` (21 skills offered; `pdb`, `data-retrieval` read in 9 of 10) | 0.79 | $0.17 |
+| skills-ab | `pmai-no-skills` | 0.68 | $0.17 |
+
+With 1 attempt on 10 tasks, a difference of about 0.1 is noise: the removed third skills-ab arm had the same skills as `pmai` and got 0.88. sa-1858 (Nirmatrelvir in SARS-CoV-2 Mpro) gets OpenAI `bio_policy` refusals with gpt-6-luna in most trials.
 
 ---
 

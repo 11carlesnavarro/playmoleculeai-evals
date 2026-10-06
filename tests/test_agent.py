@@ -84,24 +84,6 @@ def test_label(tmp_path):
     assert label(tmp_path) == "pmai"
     assert label(tmp_path, pmai_config="/opt/pmai-config/no-skills") == "pmai-no-skills"
     assert label(tmp_path, reasoning_effort="low") == "pmai-effort-low"
-    assert label(tmp_path, skills="/opt/skills-next") == "pmai-skills-next"
-
-
-def test_skills_replace_the_image_skills(tmp_path):
-    new = tmp_path / "next" / "playmolecule" / "msm-analysis"
-    new.mkdir(parents=True)
-    (new / "SKILL.md").write_text("new")
-    home = tmp_path / "home"
-    (home / "skills" / "old").mkdir(parents=True)
-    line = script_line(tmp_path, "rm -rf", skills=str(tmp_path / "next"))
-    subprocess.run(["bash", "-c", line], env={"PMAI_HOME": str(home)}, check=True)
-    assert [p.relative_to(home).as_posix() for p in sorted(home.rglob("*"))] == [
-        "skills",
-        "skills/playmolecule",
-        "skills/playmolecule/msm-analysis",
-        "skills/playmolecule/msm-analysis/SKILL.md",
-    ]
-    assert "PMAI_HOME" not in run_script(tmp_path)  # no skills option: the image skills stay
 
 
 def test_reasoning_effort(tmp_path):

@@ -1,7 +1,7 @@
 SANDBOX ?= europe-southwest1-docker.pkg.dev/repositories-368911/acellera-docker-apps/pm-python-sandbox:latest
 PMAI ?= ../playmoleculeAI
 SKILLS ?= ../../acellera/acellera-skills
-# skills baked in the image: a ref, as production (main), not the checkout, which skills-ab mounts as the next arm
+# skills baked in the image: a git ref, as production (main), not the working tree
 SKILLS_REF ?= main
 JOB ?= experiments/smoke.yaml
 # a new jobs/ folder per run; NAME=<an old job> resumes that job (Harbor keeps its finished trials)
