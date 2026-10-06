@@ -7,7 +7,8 @@ datasets:
   - path: tasks/retrieval-and-selection
   - path: tasks/3d-reasoning
 agents:
-  - import_path: pmai_evals.agent:PmaiAgent
+  - name: pmai
+    import_path: pmai_evals.agent:PmaiAgent
     model_name: gpt-6-luna
     env:
       OPENAI_API_KEY: ${OPENAI_API_KEY}

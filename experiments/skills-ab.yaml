@@ -1,0 +1,25 @@
+# Phase 3: skills A/B on structure-analysis, gpt-6-luna, once each (30 trials).
+#   pmai              the skills in the image: acellera-skills SKILLS_REF (main) at `make image` time
+#   pmai-skills-next  the acellera-skills checkout now: check out the branch to test, then run
+#   pmai-no-skills    no skills plugin
+# Each arm name must be the agent's label (tests/test_agent.py).
+n_attempts: 1
+n_concurrent_trials: 8
+datasets:
+  - path: tasks/structure-analysis
+environment:
+  mounts:
+    - type: bind
+      source: /fast_shared/users/carles/repos/acellera/acellera-skills/skills
+      target: /opt/skills-next
+      read_only: true
+agents:
+  - &arm
+    name: pmai
+    import_path: pmai_evals.agent:PmaiAgent
+    model_name: gpt-6-luna
+    env:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      FIREWORKS_API_KEY: ${FIREWORKS_API_KEY:-}  # only the kilo tier for child agents
+  - {<<: *arm, name: pmai-skills-next, kwargs: {skills: /opt/skills-next}}
+  - {<<: *arm, name: pmai-no-skills, kwargs: {pmai_config: /opt/pmai-config/no-skills}}

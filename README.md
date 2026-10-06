@@ -22,7 +22,7 @@ uv run python scripts/compare_old.py jobs/<job>   # old harness vs new, per case
 ## Layout
 
 ```text
-image/Dockerfile                  sandbox image + pmai (/opt/pmai) + grader (/opt/grader)
+image/Dockerfile                  sandbox image + pmai (/opt/pmai) + grader (/opt/grader) + skills
 config/<name>/agent_config.yaml   pmai configs, baked at /opt/pmai-config
 src/pmai_evals/agent.py           the Harbor agent (host side)
 src/pmai_evals/trial.py           what a test asks about a trial: answer, tool calls, cost
@@ -30,9 +30,10 @@ src/pmai_evals/reward.py          pytest plugin: one score per test, reward = me
 src/pmai_evals/judge.py           LLM judge for what code cannot check
 src/pmai_evals/legacy.py          runs the old eval_sets checks.py functions unchanged
 tasks/<set>/<case>/               the cases: instruction.md, task.toml, environment/, tests/
-experiments/*.yaml                Harbor job files: datasets x agents x models
+experiments/*.yaml                Harbor job files: datasets x agents (config, skills) x models
 scripts/cases_to_tasks.py         one time port: eval_sets/<set> -> tasks/<set>
 scripts/compare_old.py            a job against the old harness runs (archive)
+scripts/eval_account.py           the eval account on the dev backend: signup, verify, check
 eval_sets/                        the old case format; removed set by set after its port is compared
 docs/implementation-plan.md       the work list, phase by phase
 ```

@@ -45,12 +45,14 @@ playmoleculeai-evals/
 
 ---
 
-## Status (2026-10-05)
+## Status (2026-10-06)
 
 - Phases 0 and 1 are done. The files are the reference. The two sections below give only the changes from the first plan and the checks.
 - Phase 2: 40 tasks ported, and the port gives the old scores on 480 old trials. In Docker, `acellera-sample` (one case per set, gpt-6-luna) gave reward 1.0 on 4 of 4 trials, for less than $0.01.
 - `make image`, `make run` and `make view` work (run by the user as `slurmweb`, 2026-10-05). The first smoke trial got no reward:
   the `.env` OpenAI key is archived (401), and then `populate_context_post_run` crashed on the read only `agent.db`, which stopped the trial before the verifier. Both causes are known; the crash is fixed. Run the smoke job again with a working key.
+- Phase 3: two matrix jobs (`sa-models`, `skills-ab`), checked without Docker. The image now has the skills (it had none before). To run: `make image`, then the two jobs.
+- Phase 4: `scripts/eval_account.py`. The old harness account logs in on the dev backend, but it is a personal account (`carles`). A dedicated eval account needs the user's choice of email.
 - The old harness is removed. All of it is in `/fast_shared/users/carles/data/playmoleculeAIdata/evals-archive-2026-10-05/`:
   - `repo-before-cleanup.tar.gz`: the repo before the cleanup (old src, tests, scripts, mining, development, docs, playwright). Not in it: `.env`, `playwright/.auth`, `.venv`, `.git`, bixbench fixtures.
   - `runs/`: the old run results (34 GB), the baseline for phase 2.
@@ -161,128 +163,82 @@ bixbench: later. Its fixtures are 16 GB and 5.8 GB. Do not copy them into tasks:
 
 ---
 
-## Phase 3. The matrix
+## Phase 3. The matrix (done, to run in Docker)
 
-### 3.1 Agent configs
+Files: `config/no-skills/`, `experiments/{sa-models,skills-ab}.yaml`, the `skills` and `reasoning_effort` options and `label()` in `src/pmai_evals/agent.py`, the skills in `image/Dockerfile` and `make image`.
 
 ```text
 config/
 ├── default/agent_config.yaml
-├── effort-low/agent_config.yaml     same as default + reasoning effort low
 └── no-skills/agent_config.yaml      same as default, skills plugin removed
 ```
 
-### 3.2 `experiments/sa-models.yaml`
+| Job | Arms (label in `make view`) | Trials |
+|---|---|---|
+| `experiments/sa-models.yaml` | `pmai-effort-xhigh` gpt-6-luna, `pmai-effort-xhigh` glm-5.3-flash, `pmai-effort-low` gpt-6-luna | 30 |
+| `experiments/skills-ab.yaml` | `pmai` (image skills), `pmai-skills-next` (acellera-skills checkout), `pmai-no-skills`; all gpt-6-luna | 30 |
 
-```yaml
-job_name: sa-models
-n_attempts: 3                 # pass@3
-n_concurrent_trials: 8
-datasets:
-  - path: tasks/structure-analysis
-agents:
-  - import_path: pmai_evals.agent:PmaiAgent
-    model_name: gpt-6-luna
-    env: {OPENAI_API_KEY: "${OPENAI_API_KEY}"}
-  - import_path: pmai_evals.agent:PmaiAgent
-    model_name: glm-5.3-flash
-    env: {FIREWORKS_API_KEY: "${FIREWORKS_API_KEY}"}
-  - import_path: pmai_evals.agent:PmaiAgent
-    model_name: gpt-6-luna
-    kwargs: {pmai_config: /opt/pmai-config/effort-low}
-    env: {OPENAI_API_KEY: "${OPENAI_API_KEY}"}
+Changes from the first plan:
+- `n_attempts: 1`, no `job_name` (`make run` names each job). pass@3 is a `make run` with `n_attempts: 3` when a result needs it.
+- The image had no skills: the sandbox image is built with `SKILLS=none`, and no `SKILL.md` reached the agent in the phase 2 trials `[checked]`. `make image` now puts `acellera-skills/skills` at `SKILLS_REF` (default `main`, as the production agent image) in `/home/.pmai/skills`, and prints the skills commit. It does not take the checkout: `skills-ab` mounts the checkout as the next arm. `PMAI_HOME=/home/.pmai` is the org skills folder of the skills plugin `[checked]`.
+- Skills A/B does not set `PMAI_HOME` to the mount: `PMAI_HOME` also holds the config and `agent.db`. The agent option `skills: /opt/skills-next` replaces `$PMAI_HOME/skills` with the mounted folder before `pmai run`. The nested acellera-skills layout works: a host run listed 21 skills `[checked]`. Harbor's own `skills:` field does not: it wants `SKILL.md` in each child folder `[checked]`.
+- Reasoning effort is the agent option `reasoning_effort`, not a config folder: the script sets `reasoning.effort` in the copied config. Harbor's viewer reads this kwarg and shows a "Reasoning effort" column on the job page `[checked]`.
+- Harbor's job summary groups the results by `agent_info.name` + model, and the viewer shows the job file `name`. The agent sets `agent_info.name`: `pmai`, then the config folder if it is not `default`, then the skills folder, then `effort-<level>`. A test checks that each job file `name` is the same.
+- `sa-models` needs `FIREWORKS_API_KEY` (glm-5.3-flash). In `skills-ab` it is optional (`${FIREWORKS_API_KEY:-}`).
+
+Checked without Docker: pmai loads the configs, Harbor loads both job files, the labels resolve, unit tests for the label, the skills and effort options, and `no-skills` = `default` without the skills plugin.
+
+To run (each job less than $1):
+
+```bash
+make image                                   # again: the image now has the skills
+make run JOB=experiments/sa-models.yaml      # needs FIREWORKS_API_KEY in .env
+make run JOB=experiments/skills-ab.yaml      # check out the acellera-skills branch to test first
+make view
 ```
 
-### 3.3 Skills A/B: `experiments/skills-ab.yaml`
-
-`environment.mounts` binds into `main` only `[checked]`.
-
-```yaml
-job_name: skills-ab
-n_attempts: 3
-datasets:
-  - path: tasks/structure-analysis
-environment:
-  mounts:
-    - {type: bind, source: /fast_shared/users/carles/repos/acellera/acellera-skills, target: /opt/skills-next, read_only: true}
-agents:
-  - import_path: pmai_evals.agent:PmaiAgent
-    model_name: gpt-6-luna
-    env: {OPENAI_API_KEY: "${OPENAI_API_KEY}"}
-  - import_path: pmai_evals.agent:PmaiAgent
-    model_name: gpt-6-luna
-    env: {OPENAI_API_KEY: "${OPENAI_API_KEY}", PMAI_HOME: /opt/skills-next}   # [verify] layout: <home>/skills/*/SKILL.md
-```
-
-**Done when:** `harbor view` shows the agents side by side with pass@3, tokens and cost.
+**Done when:** `harbor view` shows the arms side by side with reward, tokens and cost.
 
 ---
 
-## Phase 4. Eval account (one time)
+## Phase 4. Eval account (done, account choice open)
 
 Facts `[checked]` in pmbackend:
 - Login: `GET /v3/auth/csrf`, then `POST /v3/auth/login` (form `username`=email, `password`, header `X-CSRF-Token` = the `csrf_token` cookie).
-- Cookies: `access_token="Bearer <jwt>"` (path `/v3`), `refresh_token` (path `/v3/auth/refresh-token`), `csrf_token` (path `/`).
-- Signup: `POST /v3/auth/signup` JSON. Email verification is on by default: a code goes to the email, then `POST /v3/auth/verify/mail`.
+- The access token works as a cookie (`access_token="Bearer <jwt>"`) or as an `Authorization: Bearer <jwt>` header. The script uses the header: httpx does not send `Secure` cookies over plain http.
+- Signup: `POST /v3/auth/signup` JSON (`username`, `email`, `password`, `institution_name`, `country`, `city`, `affiliation`). It returns 403 if `auth.allowed_emails` is set and the email is not in it. Email verification is on by default: a code goes to the email, then `POST /v3/auth/verify/mail` with a login token.
+- After the verification, the account joins the group whose `email_patterns` match the email, if there is one.
 - PMView opens a modal if the user has no `country`.
 - No captcha, no 2FA, no API key. The access JWT expires after `auth.jwt_expiration` minutes.
+- Job bucket name: `config["bucket"]`, default `{user_id}-jobs`.
 
-Try first: `.env` has `PM_EMAIL` and `PM_PASSWORD` from the old harness. If that account logs in on the dev backend, use it as the eval account and skip the signup.
+File: `scripts/eval_account.py` (`signup`, `verify CODE`, `check`). `PM_BACKEND` defaults to the dev backend.
 
-### 4.1 `scripts/eval_account.py`
+Result (2026-10-06): `check` with the old harness account (`PM_EMAIL`, `PM_PASSWORD`) on `http://computer19:8002` logs in:
 
-The cookies can be `Secure`, and httpx does not send `Secure` cookies over plain HTTP. So the script sends them in a header.
+| Field | Value |
+|---|---|
+| user_id, username | `carles` |
+| group | `carles` (personal) |
+| country | Spain |
+| default project | `carles-project` |
+| priorities | normal, 2gpus, general, low |
 
-```python
-"""One time: create the eval account on the dev backend and check the login.
+This is a personal account. Phase 6 jobs would go to its bucket (`carles-jobs` by default) and its credit. A dedicated account (for example `pmai-evals`) keeps them apart. It needs an email that can get the code, and that matches no group `email_patterns`:
 
+```bash
+# .env: PM_EVAL_EMAIL, PM_EVAL_PASSWORD
 set -a && . ./.env && set +a
 uv run python scripts/eval_account.py signup        # a code goes to PM_EVAL_EMAIL
 uv run python scripts/eval_account.py verify CODE
-uv run python scripts/eval_account.py check         # prints user info: put the id in PM_EVAL_USER_ID
-"""
-
-import os
-import sys
-
-import httpx
-
-B = os.environ["PM_BACKEND"] + "/v3"
-EMAIL, PASSWORD = os.environ["PM_EVAL_EMAIL"], os.environ["PM_EVAL_PASSWORD"]
-
-
-def login(c: httpx.Client) -> dict[str, str]:
-    r = c.get(f"{B}/auth/csrf")
-    csrf = r.json()["csrf_token"]
-    r = c.post(f"{B}/auth/login", data={"username": EMAIL, "password": PASSWORD},
-               headers={"X-CSRF-Token": csrf, "Cookie": f"csrf_token={csrf}"})
-    r.raise_for_status()
-    return {k: v for k, v in r.cookies.items()}
-
-
-def cookie_header(cookies: dict[str, str]) -> dict[str, str]:
-    return {"Cookie": "; ".join(f"{k}={v}" for k, v in cookies.items())}
-
-
-cmd = sys.argv[1]
-with httpx.Client() as c:
-    if cmd == "signup":
-        c.post(f"{B}/auth/signup", json={"username": "pmai-evals", "email": EMAIL, "password": PASSWORD,
-                                          "country": "Spain", "institution_name": "Acellera"}).raise_for_status()
-    elif cmd == "verify":
-        c.post(f"{B}/auth/verify/mail", json={"email": EMAIL, "code": sys.argv[2]}).raise_for_status()
-    elif cmd == "check":
-        h = cookie_header(login(c))
-        print(c.get(f"{B}/auth/user-info", headers=h).json())
-        print("default project:", c.get(f"{B}/default-project", headers=h).json())
+uv run python scripts/eval_account.py check         # put user_id in PM_EVAL_USER_ID
 ```
 
-To settle once:
-- Use an email that does not match a group `email_patterns`, or the account joins a shared bucket.
+Still to settle in phase 6:
 - If the dev backend enforces credits, an admin grants credit with `POST /v3/admin/groups/{id}/grants`.
-- Write down the bucket folder on computer19: `$PM_DATA_STORAGE/<bucket>`, with `<bucket>` = `{user_id}-jobs` by default. Phase 6 needs it.
+- The bucket folder on computer19 (`$PM_DATA_STORAGE/<bucket>`). It is not visible from ws12.
 
-**Done when:** `check` prints the user with a country.
+**Done when:** `check` prints the user with a country. Done for the personal account.
 
 ---
 

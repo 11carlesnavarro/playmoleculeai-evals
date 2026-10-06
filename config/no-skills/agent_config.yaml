@@ -1,0 +1,41 @@
+# config/default without the skills plugin: the agent sees no skills.
+# No db_path: agent.db goes in the config folder (/logs/agent/home), which Harbor syncs to the host.
+config_version: 1          # without it pmai rewrites the file on start
+port: 8100                 # --serve listens here (phase 5)
+reasoning:
+  summary: auto
+  effort: xhigh
+sandbox:
+  backend_type: local      # tools run in the trial container
+project_instructions:
+  enabled: true
+  filename: AGENTS.md
+
+# Models users can pick. A tier (giga, mega, kilo) places a model on the
+# agent ladder. Entries of the same model share its tier, so tag one of them.
+summary_model: gpt-6-luna
+available_models:
+  - gpt-6-luna:
+      tier: kilo
+  - gpt-6.1-sol:
+      tier: mega
+  - gpt-6-astra-low:
+      model: gpt-6-astra
+      tier: giga
+      effort: low
+  - glm-5.3-flash:
+      provider: fireworks
+      model: accounts/fireworks/models/glm-5p3-flash
+      tier: kilo
+
+# The model a child agent gets for each tier. A tier at or above the
+# creator's tier, or a creator with no tier, gives the creator's model.
+agent_tiers:
+  giga: gpt-6-astra
+  mega: gpt-6.1-sol
+  kilo: glm-5.3-flash
+
+# Not here: playmolecule (config/pm adds it, phase 6), codebase_search and literature.
+# The last two start, but their tools fail in the container: no SEARCH_URL service, no literature data.
+plugins:
+  viewer: {}

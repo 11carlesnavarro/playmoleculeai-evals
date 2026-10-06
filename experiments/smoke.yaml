@@ -3,7 +3,8 @@ n_concurrent_trials: 2
 datasets:
   - path: tasks/smoke
 agents:
-  - import_path: pmai_evals.agent:PmaiAgent
+  - name: pmai
+    import_path: pmai_evals.agent:PmaiAgent
     model_name: gpt-6-luna
     env:
       OPENAI_API_KEY: ${OPENAI_API_KEY}

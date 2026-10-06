@@ -2,6 +2,9 @@ import asyncio
 import json
 import shlex
 import subprocess
+from pathlib import Path
+
+import yaml
 
 from pmai_evals.agent import PmaiAgent
 from test_trial import make_db
@@ -17,6 +20,10 @@ def run_script(tmp_path, **kwargs) -> str:
     agent.exec_as_agent = fake_exec
     asyncio.run(agent.run("it's a 'quoted' prompt", environment=None, context=None))
     return sent[0]
+
+
+def script_line(tmp_path, start: str, **kwargs) -> str:
+    return next(x for x in run_script(tmp_path, **kwargs).splitlines() if x.startswith(start))
 
 
 def test_script(tmp_path):
@@ -63,7 +70,65 @@ def test_context_never_raises(tmp_path):
 def test_exit_trap_keeps_the_exit_code(tmp_path):
     """The trap chmods /logs/agent. Here it does not exist, so chmod fails, as on parts owned by the host."""
     lines = run_script(tmp_path).splitlines()
-    head = "\n".join([lines[1], next(line for line in lines if line.startswith("trap "))])
+    head = "\n".join([lines[1], script_line(tmp_path, "trap ")])
     assert head.startswith("set -e")
     for end, code in [("true", 0), ("false", 1), ("exit 3", 3)]:
         assert subprocess.run(["bash", "-c", f"{head}\n{end}"]).returncode == code
+
+
+def label(tmp_path, **kwargs) -> str:
+    return PmaiAgent(logs_dir=tmp_path, model_name="gpt-6-luna", **kwargs).to_agent_info().name
+
+
+def test_label(tmp_path):
+    assert label(tmp_path) == "pmai"
+    assert label(tmp_path, pmai_config="/opt/pmai-config/no-skills") == "pmai-no-skills"
+    assert label(tmp_path, reasoning_effort="low") == "pmai-effort-low"
+    assert label(tmp_path, skills="/opt/skills-next") == "pmai-skills-next"
+
+
+def test_skills_replace_the_image_skills(tmp_path):
+    new = tmp_path / "next" / "playmolecule" / "msm-analysis"
+    new.mkdir(parents=True)
+    (new / "SKILL.md").write_text("new")
+    home = tmp_path / "home"
+    (home / "skills" / "old").mkdir(parents=True)
+    line = script_line(tmp_path, "rm -rf", skills=str(tmp_path / "next"))
+    subprocess.run(["bash", "-c", line], env={"PMAI_HOME": str(home)}, check=True)
+    assert [p.relative_to(home).as_posix() for p in sorted(home.rglob("*"))] == [
+        "skills",
+        "skills/playmolecule",
+        "skills/playmolecule/msm-analysis",
+        "skills/playmolecule/msm-analysis/SKILL.md",
+    ]
+    assert "PMAI_HOME" not in run_script(tmp_path)  # no skills option: the image skills stay
+
+
+def test_reasoning_effort(tmp_path):
+    """The script line sets the top level effort of the real config, not the effort of a model entry."""
+    home = tmp_path / "logs/agent/home"
+    home.mkdir(parents=True)
+    default = Path("config/default/agent_config.yaml").read_text()
+    (home / "agent_config.yaml").write_text(default)
+    line = script_line(tmp_path, "sed ", reasoning_effort="low")
+    subprocess.run(["bash", "-c", line.replace("/logs/", f"{tmp_path}/logs/")], check=True)
+    cfg = yaml.safe_load((home / "agent_config.yaml").read_text())
+    assert cfg["reasoning"]["effort"] == "low" and yaml.safe_load(default)["reasoning"]["effort"] == "xhigh"
+    assert cfg["available_models"] == yaml.safe_load(default)["available_models"]
+    assert "sed " not in run_script(tmp_path)  # no option: the config's effort
+
+
+def test_arm_names_are_the_labels(tmp_path):
+    """The viewer shows the job file name, the job summary the label: they must be the same."""
+    for job in Path("experiments").glob("*.yaml"):
+        for arm in yaml.safe_load(job.read_text())["agents"]:
+            assert arm["name"] == label(tmp_path, **arm.get("kwargs", {})), job
+
+
+def test_no_skills_is_default_without_skills():
+    def load(name):
+        return yaml.safe_load(Path(f"config/{name}/agent_config.yaml").read_text())
+
+    default = load("default")
+    del default["plugins"]["skills"]
+    assert load("no-skills") == default
