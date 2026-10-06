@@ -1,0 +1,174 @@
+{
+  "cases": {
+    "dr-0001": {
+      "answer": "C",
+      "attachment_bond": [
+        "C27",
+        "C46"
+      ],
+      "candidate_rotation_deg": {
+        "A": 70.0,
+        "B": 125.0,
+        "C": 0.0,
+        "D": 235.0
+      },
+      "hidden_component": "terminal N methylpiperazine region",
+      "source_instance": "A:201",
+      "source_ligand": "STI",
+      "source_pdb": "1IEP"
+    },
+    "dr-0002": {
+      "answer": "A",
+      "attachment_bond": [
+        "CBA",
+        "OAV"
+      ],
+      "candidate_rotation_deg": {
+        "A": 0.0,
+        "B": 70.0,
+        "C": 125.0,
+        "D": 235.0
+      },
+      "hidden_component": "morpholine propoxy region",
+      "source_instance": "A:1101",
+      "source_ligand": "IRE",
+      "source_pdb": "4WKQ"
+    },
+    "dr-0003": {
+      "answer": "D",
+      "attachment_bond": [
+        "C20",
+        "N21"
+      ],
+      "candidate_rotation_deg": {
+        "A": 70.0,
+        "B": 125.0,
+        "C": 235.0,
+        "D": 0.0
+      },
+      "hidden_component": "chlorothiophene carboxamide region",
+      "source_instance": "A:1001",
+      "source_ligand": "RIV",
+      "source_pdb": "2W26"
+    },
+    "dr-0004": {
+      "answer": "B",
+      "attachment_bond": [
+        "N1",
+        "C4"
+      ],
+      "candidate_rotation_deg": {
+        "A": 70.0,
+        "B": 0.0,
+        "C": 125.0,
+        "D": 235.0
+      },
+      "hidden_component": "methoxyphenyl region",
+      "source_instance": "A:298",
+      "source_ligand": "GG2",
+      "source_pdb": "2P16"
+    },
+    "dr-0005": {
+      "answer": "C",
+      "attachment_bond": [
+        "C01",
+        "C07"
+      ],
+      "candidate_rotation_deg": {
+        "A": 70.0,
+        "B": 125.0,
+        "C": 0.0,
+        "D": 235.0
+      },
+      "hidden_component": "chlorophenyl region",
+      "source_instance": "A:1",
+      "source_ligand": "032",
+      "source_pdb": "3OG7"
+    },
+    "dr-0006": {
+      "answer": "D",
+      "attachment_bond": [
+        "CAQ",
+        "NAF"
+      ],
+      "candidate_rotation_deg": {
+        "A": 70.0,
+        "B": 125.0,
+        "C": 235.0,
+        "D": 0.0
+      },
+      "hidden_component": "piperazine and cyclopropylcarbonyl region",
+      "source_instance": "A:1101",
+      "source_ligand": "09L",
+      "source_pdb": "7AAD"
+    },
+    "dr-0007": {
+      "answer": "B",
+      "attachment_bond": [
+        "C14",
+        "N4"
+      ],
+      "candidate_rotation_deg": {
+        "A": 70.0,
+        "B": 0.0,
+        "C": 125.0,
+        "D": 235.0
+      },
+      "hidden_component": "trifluoroacetyl region",
+      "source_instance": "A:401",
+      "source_ligand": "4WI",
+      "source_pdb": "7TLL"
+    },
+    "dr-0008": {
+      "answer": "B",
+      "gold_definition": "centroid of receptor atoms within 5 A of hidden partner",
+      "hidden_chain": "B",
+      "source_pdb": "1YCR",
+      "visible_chain": "A"
+    },
+    "dr-0009": {
+      "answer": "D",
+      "candidate_transform": {
+        "A": "120 degree rotation around helix axis",
+        "B": "180 degree end for end rotation",
+        "C": "240 degree axial rotation and 3.5 A outward translation",
+        "D": "original deposited placement"
+      },
+      "hidden_chain": "B",
+      "source_pdb": "1BXL",
+      "visible_chain": "A"
+    },
+    "dr-0010": {
+      "answer": "A",
+      "candidate_rotation_deg": {
+        "A": 0.0,
+        "B": 90.0,
+        "C": 180.0,
+        "D": 270.0
+      },
+      "hidden_chain": "B",
+      "source_pdb": "4ZQK",
+      "visible_chain": "A"
+    }
+  },
+  "schema_version": 1,
+  "source_checksums_sha256": {
+    "032_ideal.sdf": "6e12fab8b79272e37e7306a6f1d9646b77b5d147fa27316fe843f69367f73b65",
+    "09L_ideal.sdf": "bfefcecea9f3e8ba21ac690c8b5683b4ffb9b419e4d6d8630351975364742fc6",
+    "1BXL.pdb": "b80e528ace8b6c893c714782b658637de28ca2cc2a4a9591aec2d2429b289864",
+    "1IEP.pdb": "577386b4b8bc58a570facba0c8a843386842caef5ed7b60106c685d0f68d4218",
+    "1YCR.pdb": "d8f23749da9ec22da2e17bb31c33803e3db6123233cd0404bdc005111196e7a3",
+    "2P16.pdb": "00ee06bbd8635d732edc7a5acd3ba255d8489976a8a382fd51cf295cdb229905",
+    "2W26.pdb": "84bbe1aaedf6c060d17141aeee3071af38c62fb8165318d24c7c243e3b50aa91",
+    "3OG7.pdb": "d973c0e5bbf0aa47c7bf42e9e283c8a9901b5e35c595bb089335e73ea4883b0e",
+    "4WI_ideal.sdf": "10e5799ab1a75309cf705b8435130455b65b0a26e70ca8181723accca18d13b7",
+    "4WKQ.pdb": "e1cfac5caee7a9a97ba78f4adde2cf8657f5949505c34a96cdda9cfd32cf8063",
+    "4ZQK.pdb": "e0514bc4c74cd1a2fbcb22e023893bf0d69e7b3bab796dbb7fa0acb7b96fa8ad",
+    "7AAD.pdb": "935de91bf6d5805d7c2ec5fbc149c2df1308e42671c781b434e59e02028d5c83",
+    "7TLL.pdb": "97b1f8c30a36cf95df0cc3c225087bac1d2726fceac1ecf53b5a603a93370ede",
+    "GG2_ideal.sdf": "7a496a7bc72862e531fa594c6909e6db6d180634998e3f794dd8120f2a5c65a3",
+    "IRE_ideal.sdf": "593ecc6f9281b1a1294d16fa07004947a4cc5a0bf46e715f4594f2a7007f757d",
+    "RIV_ideal.sdf": "4ff40eb13b06bb16ae50b652a6e77c10a3f8db5c713a2915a43cdd0266f765cd",
+    "STI_ideal.sdf": "40632f45778eb6d01bfb78502d777559590559d4ae7feb452be911501b9958cd"
+  }
+}

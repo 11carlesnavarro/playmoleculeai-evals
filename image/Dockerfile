@@ -12,7 +12,7 @@ RUN uv venv /opt/pmai --python 3.12 \
 
 # the grader: pinned, so reference values do not move when the sandbox moves
 RUN uv venv /opt/grader --python 3.12 \
- && uv pip install --python /opt/grader pytest anthropic pandas "moleculekit<1.12"
+ && uv pip install --python /opt/grader pytest anthropic pandas rdkit "moleculekit<1.12"
 
 COPY config/ /opt/pmai-config/
 COPY src/pmai_evals/ /opt/pmai_evals/

@@ -1,0 +1,10 @@
+[
+  {
+    "function": "rs_select_choice",
+    "kwargs": {}
+  },
+  {
+    "function": "rs_select_answer_tag",
+    "kwargs": {}
+  }
+]

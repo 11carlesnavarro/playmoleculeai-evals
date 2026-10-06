@@ -37,6 +37,7 @@ playmoleculeai-evals/
 ├── experiments/*.yaml            Harbor job configs (results go to jobs/, gitignored)
 ├── scripts/cases_to_tasks.py     one time port from eval_sets/
 ├── scripts/legacy_test_case.py   test file copied into every ported task
+├── scripts/compare_old.py        a job against the old runs in the archive
 ├── scripts/eval_account.py       phase 4
 ├── tests/                        unit tests for src/ and viewer/
 └── eval_sets/                    deleted set by set, after each port is verified
@@ -47,6 +48,7 @@ playmoleculeai-evals/
 ## Status (2026-10-05)
 
 - Phases 0 and 1 are done. The files are the reference. The two sections below give only the changes from the first plan and the checks.
+- Phase 2: 40 tasks ported, and the port gives the old scores on 480 old trials. In Docker, `acellera-sample` (one case per set, gpt-6-luna) gave reward 1.0 on 4 of 4 trials, for less than $0.01.
 - `make image`, `make run` and `make view` work (run by the user as `slurmweb`, 2026-10-05). The first smoke trial got no reward:
   the `.env` OpenAI key is archived (401), and then `populate_context_post_run` crashed on the read only `agent.db`, which stopped the trial before the verifier. Both causes are known; the crash is fixed. Run the smoke job again with a working key.
 - The old harness is removed. All of it is in `/fast_shared/users/carles/data/playmoleculeAIdata/evals-archive-2026-10-05/`:
@@ -108,237 +110,52 @@ make run JOB=experiments/smoke.yaml && make view
 
 ---
 
-## Phase 2. Port the eval sets with the old checks
+## Phase 2. Port the eval sets with the old checks (done)
 
 Only `molecular-visualization` reads viewer data (`viewer_state`, `viewer_selection`, `load_system`) `[checked]`. The other four acellera-bench sets read only the final answer and the project files. They run now, without a viewer.
 
 Behaviour note: in these runs the viewer tools are offered but fail with "No viewer is connected" `[checked]`. The agent uses moleculekit in bash. Phase 5 runs them again with the viewer.
 
-### 2.1 `src/pmai_evals/legacy.py`
+Files: `src/pmai_evals/legacy.py`, `scripts/legacy_test_case.py`, `scripts/cases_to_tasks.py`, `scripts/compare_old.py`, `experiments/acellera-{sample,noviewer}.yaml`, `tasks/{structure-analysis,cheminformatics-analysis,retrieval-and-selection,3d-reasoning}/` (40 tasks), `tests/test_legacy.py`.
 
-The old checks get `(artifact, config)` and return an `AssertionResult`. `config = {**kwargs, "function": name}` `[checked]` in `grading/assertions.py`.
+Changes from the first plan:
+- `legacy.py` has only what these four sets use: `PYTHON_CHECK_TYPE`, `AssertionResult`, `RunArtifact` (`project_files_dir`, `final_answer`) and `check()`. Phase 5 adds the viewer methods, and bixbench adds `Settings` and `AssertionConfigError` (code in the first version of this file, commit 5ab2416).
+- `cases_to_tasks.py` stops on a set whose checks read viewer data (phase 5). A `preload.viewer.pdb_ids` is not loaded (`rs-numbering`: the prompt names 1TTR). It copies to `tests/fixtures/` only the files that the checks read (`FIXTURES / "ground_truth.json"`).
+- The grader venv in the image has `rdkit`: `cheminformatics-analysis` compares SMILES with it, and without it a correct but different SMILES gets 0 with no error.
+- `cheminformatics-analysis` is the old `bioactivity-and-sar` (same case ids).
+- Ruff does not check `tasks/*/*/tests/checks.py`: old code, copied unchanged.
 
-```python
-"""Run unchanged old checks.py functions against a Harbor trial."""
+Checked: the old trials graded again with the ported tasks, with no model and no Docker. For each old trial, an `agent.db` with its `final_answer.md`, `work_dir` = its `project_files/`, and the task tests in a venv with only pytest and rdkit:
 
-import io
-import os
-import re
-import zipfile
-from dataclasses import dataclass, field
-from functools import cached_property
-from pathlib import Path
+| Old runs (archive) | Trials | Assertions | Same score as the old `grade.json` |
+|---|---|---|---|
+| all acellera-bench runs of the four sets (`stap`, `stap-mini`, `stap-noviewer`, `stap-base`) | 480 | 708 (617 pass, 70 fail, 21 partial) | 480 of 480 |
 
-from pmai_evals import trial
+### 2.4 Run in Docker (done)
 
-PYTHON_CHECK_TYPE = "python_check"
-
-
-class AssertionConfigError(ValueError):
-    pass
-
-
-@dataclass
-class AssertionResult:
-    assertion_type: str
-    score: float
-    evidence: str = ""
-    config: dict = field(default_factory=dict)
-
-
-class Settings:  # bixbench reads its judge key here
-    anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
-
-
-class RunArtifact:
-    """The things old checks read, taken from the trial."""
-
-    project_files_dir = trial.WORK
-
-    def final_answer(self) -> str:
-        return trial.answer()
-
-    def viewer_state(self):
-        return trial.viewer_state()
-
-    def viewer_selection(self):
-        return trial.viewer_selection()
-
-    @cached_property
-    def _systems(self) -> list[tuple[str, Path]]:
-        out = Path("/tmp/viewer-export")
-        with zipfile.ZipFile(io.BytesIO(trial.viewer_get("/export"))) as z:
-            z.extractall(out)
-        # PMView prefixes each file with a base 36 id: "<id>_<name>"
-        return [(re.sub(r"^[0-9a-z]{7,10}_", "", p.stem), p)
-                for p in sorted(out.rglob("*")) if p.is_file() and p.name != "config.pmv"]
-
-    def system_files(self) -> list[tuple[str, Path]]:
-        return self._systems
-
-    def load_system(self, name: str):
-        from moleculekit.molecule import Molecule
-
-        for logical, path in self._systems:
-            if logical.lower() == name.lower():
-                return Molecule(str(path))
-        raise KeyError(f"system {name!r} not in export; available: {[n for n, _ in self._systems]}")
-
-
-def check(module, function: str, **kwargs) -> float:
-    try:
-        result = getattr(module, function)(RunArtifact(), {**kwargs, "function": function})
-    except Exception as exc:  # the old runner also gave a crash 0
-        print(f"{function} raised {type(exc).__name__}: {exc}")
-        return 0.0
-    print(result.evidence)  # lands in verifier/test-stdout.txt
-    return result.score
-```
-
-### 2.2 `scripts/legacy_test_case.py`
-
-The same file goes into every ported task as `tests/test_case.py`.
-
-```python
-import json
-from pathlib import Path
-
-import checks
-import pytest
-
-from pmai_evals.legacy import check
-from pmai_evals.reward import partial
-
-SPECS = json.loads((Path(__file__).parent / "assertions.json").read_text())
-
-
-@pytest.mark.parametrize("spec", SPECS, ids=[s["function"] for s in SPECS])
-def test_check(spec):
-    assert partial(check(checks, spec["function"], **spec["kwargs"])) > 0
-```
-
-### 2.3 `scripts/cases_to_tasks.py`
-
-Fixture paths are `<set>/fixtures/<file>` `[checked]` in `eval_loader.py`. The old uploader put files in the project root by basename.
-
-```python
-"""One time port: eval_sets/<set>/ -> tasks/<set>/<case>/.
-
-uv run python scripts/cases_to_tasks.py eval_sets/acellera-bench/structure-analysis tasks/structure-analysis
-"""
-
-import json
-import re
-import shutil
-import sys
-from pathlib import Path
-
-import yaml
-
-IMAGE = "pmai-eval:latest"
-HERE = Path(__file__).parent
-TEST_SH = "#!/bin/bash\nPYTHONPATH=/opt exec /opt/grader/bin/pytest /tests -q -p pmai_evals.reward\n"
-TOML = """schema_version = "1.4"
-
-[task]
-name = "acellera/{id}"
-keywords = {tags}
-
-[agent]
-timeout_sec = {timeout}
-
-[verifier]
-timeout_sec = 600
-
-[environment]
-{image}network_mode = "public"
-cpus = 2
-memory_mb = 8192
-"""
-
-
-def port(src: Path, out: Path) -> None:
-    spec = yaml.safe_load((src / "eval_set.yaml").read_text())
-    checks = re.sub(r"^from pmai_evals\.[\w.]+ import ", "from pmai_evals.legacy import ",
-                    (src / "checks.py").read_text(), flags=re.M)
-    viewer = re.search(r"artifact\.(viewer_state|viewer_selection|load_system|system_files)", checks)
-    for case in yaml.safe_load((src / "cases.yaml").read_text())["cases"]:
-        task = out / case["id"]
-        shutil.rmtree(task, ignore_errors=True)
-        (task / "tests").mkdir(parents=True)
-        pre = case.get("preload", {})
-        project = pre.get("project", {}).get("files", [])
-        view = pre.get("viewer", {})
-        files = project + view.get("files", [])
-        env = task / "environment"  # Harbor needs it, also when it is empty
-        env.mkdir()
-        if files:
-            for f in files:
-                shutil.copy(src / "fixtures" / f, env / Path(f).name)
-            env.joinpath("Dockerfile").write_text(
-                f"FROM {IMAGE}\n" + "".join(f"COPY {Path(f).name} /app/\n" for f in files))
-        if viewer or view:  # phase 5
-            env.joinpath("docker-compose.yaml").write_text((HERE / "viewer_compose.yaml").read_text()
-                .replace("@PDB@", " ".join(view.get("pdb_ids", [])))
-                .replace("@FILES@", " ".join(Path(f).name for f in view.get("files", []))))
-        timeout = case.get("timeout_s") or spec.get("default_timeout_s") or 1800
-        image = "" if files else f'docker_image = "{IMAGE}"\n'
-        (task / "task.toml").write_text(TOML.format(
-            id=case["id"], tags=json.dumps(case.get("tags", [])), timeout=timeout, image=image))
-        (task / "instruction.md").write_text(case["prompt"])
-        (task / "tests/test.sh").write_text(TEST_SH)
-        (task / "tests/test.sh").chmod(0o755)
-        (task / "tests/checks.py").write_text(checks)
-        shutil.copy(HERE / "legacy_test_case.py", task / "tests/test_case.py")
-        specs = [{"function": a["function"], "kwargs": a.get("kwargs", {})}
-                 for a in case.get("assertions", []) if a["type"] == "python_check"]
-        (task / "tests/assertions.json").write_text(json.dumps(specs, indent=2))
-        if "FIXTURES" in checks:  # ground truth files that checks.py reads
-            shutil.copytree(src / "fixtures", task / "tests/fixtures")
-        if not any(env.iterdir()):
-            env.joinpath(".gitkeep").touch()
-    print(f"{out}: {len(list(out.iterdir()))} tasks")
-
-
-if __name__ == "__main__":
-    port(Path(sys.argv[1]), Path(sys.argv[2]))
-```
-
-Each task gets its own copy of the set's `checks.py`. That is duplication on purpose: a task folder must be complete. Trim the copies later if they become a problem.
-
-### 2.4 Port and compare
+The regrade above already shows that the grading is the same. What Docker adds: the task images (`COPY` to `/app`), `pmai run` in the sandbox image, and the grader in the container. One trial per set covers that:
 
 ```bash
-for s in structure-analysis cheminformatics-analysis retrieval-and-selection 3d-reasoning; do
-  uv run python scripts/cases_to_tasks.py eval_sets/acellera-bench/$s tasks/$s
-done
+make image                       # again: the grader venv now has rdkit
+make run JOB=experiments/acellera-sample.yaml        # 4 trials, gpt-6-luna, a few cents
+uv run python scripts/compare_old.py jobs/acellera-sample
 ```
 
-`experiments/acellera-noviewer.yaml`:
+`compare_old.py` costs nothing: it reads the job `result.json` files and the old `grade.json` files, and prints the mean reward per case, old and new. A trial with no verifier result is an infra error, not a 0.
 
-```yaml
-job_name: acellera-noviewer
-n_attempts: 3
-n_concurrent_trials: 8
-datasets:
-  - path: tasks/structure-analysis
-  - path: tasks/cheminformatics-analysis
-  - path: tasks/retrieval-and-selection
-  - path: tasks/3d-reasoning
-agents:
-  - import_path: pmai_evals.agent:PmaiAgent
-    model_name: gpt-6-luna
-    env:
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-```
+**Done when:** the 4 trials have a reward, and each failure has a known cause.
 
-Compare the pass rate per case with the last old run in the archive `runs/` (for example `evals-archive-2026-10-05/runs/20260812-154133_acellera-bench__structure-analysis_stap`).
+Result (2026-10-05): reward 1.0 on dr-0001, rs-uniprot, sa-0071 and sar-descriptors, 0 tool errors, 14 to 62 s for each agent run. Harbor marked each trial with `NonZeroAgentExitCodeError`: the exit trap ran `chmod` on parts of `/logs/agent` that belong to the host user, and with `set -e` that failure became exit 1. Fixed: the trap keeps the exit code (`|| true`, then `exit $rc`).
 
-**Done when:** each set is within the noise of the old harness, or each difference has a known cause (no viewer).
+Each `make run` writes a new `jobs/<job file>-<date>/`. A fixed `job_name` made Harbor resume the old job and keep its finished trials, also the failed ones. `make run NAME=<old job>` resumes a job on purpose.
+
+Optional: `experiments/acellera-noviewer.yaml` runs all 40 tasks once with `gpt-6-luna` (about $0.60). The old runs used `gpt-5.4`, so the pass rates show the model change too. A run with `gpt-5.4` and 3 seeds, as the old runs, costs about $45: do it only if the user asks.
+
+Default for eval runs: `gpt-6-luna` and `n_attempts: 1`, as few tasks as answer the question.
 
 ### 2.5 Delete the old harness (done on 2026-10-05)
 
-The old harness, `mining/`, `development/`, the old docs and scripts are removed (see Status). Still to do: remove each `eval_sets/acellera-bench/<set>` after its port is verified.
+The old harness, `mining/`, `development/`, the old docs and scripts are removed (see Status). Still to do: remove each `eval_sets/acellera-bench/<set>` after its tasks run in Docker (2.4).
 
 bixbench: later. Its fixtures are 16 GB and 5.8 GB. Do not copy them into tasks: bind mount them read only in the job file.
 

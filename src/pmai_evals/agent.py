@@ -42,7 +42,8 @@ class PmaiAgent(BaseInstalledAgent):
             command=f"""
 set -e
 # also when pmai fails: the host user can then read agent.db and delete the trial folder
-trap 'chmod -R a+rwX /logs/agent' EXIT
+# keep the exit code: parts of /logs/agent belong to the host user, and chmod fails there
+trap 'rc=$?; chmod -R a+rwX /logs/agent 2>/dev/null || true; exit $rc' EXIT
 mkdir -p {HOME} {o.work}
 cp -r {o.pmai_config}/. {HOME}/
 echo {o.work} > /logs/agent/work_dir

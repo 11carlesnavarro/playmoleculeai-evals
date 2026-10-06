@@ -15,7 +15,8 @@ harbor run ──► trial container (pmai-eval image)
 cp .env.example .env              # add the keys
 make image                        # pmai-eval:latest (needs Docker and ../playmoleculeAI)
 make run JOB=experiments/smoke.yaml
-make view                         # results in jobs/
+make view                         # results in jobs/<job file>-<date>/
+uv run python scripts/compare_old.py jobs/<job>   # old harness vs new, per case
 ```
 
 ## Layout
@@ -27,9 +28,12 @@ src/pmai_evals/agent.py           the Harbor agent (host side)
 src/pmai_evals/trial.py           what a test asks about a trial: answer, tool calls, cost
 src/pmai_evals/reward.py          pytest plugin: one score per test, reward = mean
 src/pmai_evals/judge.py           LLM judge for what code cannot check
+src/pmai_evals/legacy.py          runs the old eval_sets checks.py functions unchanged
 tasks/<set>/<case>/               the cases: instruction.md, task.toml, environment/, tests/
 experiments/*.yaml                Harbor job files: datasets x agents x models
-eval_sets/                        the old case format, kept for the port (phase 2)
+scripts/cases_to_tasks.py         one time port: eval_sets/<set> -> tasks/<set>
+scripts/compare_old.py            a job against the old harness runs (archive)
+eval_sets/                        the old case format; removed set by set after its port is compared
 docs/implementation-plan.md       the work list, phase by phase
 ```
 

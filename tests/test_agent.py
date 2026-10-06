@@ -1,6 +1,7 @@
 import asyncio
 import json
 import shlex
+import subprocess
 
 from pmai_evals.agent import PmaiAgent
 from test_trial import make_db
@@ -25,7 +26,6 @@ def test_script(tmp_path):
     assert "--config /logs/agent/home --model gpt-6-luna --output json" in s
     assert shlex.quote("it's a 'quoted' prompt") in s
     assert s.rstrip().endswith("> /logs/agent/events.jsonl")
-    assert "trap 'chmod -R a+rwX /logs/agent' EXIT" in s
 
 
 def test_no_model(tmp_path):
@@ -58,3 +58,12 @@ def test_context_never_raises(tmp_path):
     ctx = Ctx()
     PmaiAgent(logs_dir=tmp_path).populate_context_post_run(ctx)
     assert not vars(ctx)
+
+
+def test_exit_trap_keeps_the_exit_code(tmp_path):
+    """The trap chmods /logs/agent. Here it does not exist, so chmod fails, as on parts owned by the host."""
+    lines = run_script(tmp_path).splitlines()
+    head = "\n".join([lines[1], next(line for line in lines if line.startswith("trap "))])
+    assert head.startswith("set -e")
+    for end, code in [("true", 0), ("false", 1), ("exit 3", 3)]:
+        assert subprocess.run(["bash", "-c", f"{head}\n{end}"]).returncode == code

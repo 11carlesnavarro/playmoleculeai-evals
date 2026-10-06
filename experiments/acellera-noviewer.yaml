@@ -1,0 +1,13 @@
+# Optional: all 40 ported tasks once with gpt-6-luna (about $0.60). For a Docker check, acellera-sample.yaml is enough.
+n_attempts: 1
+n_concurrent_trials: 8
+datasets:
+  - path: tasks/structure-analysis
+  - path: tasks/cheminformatics-analysis
+  - path: tasks/retrieval-and-selection
+  - path: tasks/3d-reasoning
+agents:
+  - import_path: pmai_evals.agent:PmaiAgent
+    model_name: gpt-6-luna
+    env:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}

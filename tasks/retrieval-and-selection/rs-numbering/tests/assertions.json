@@ -1,0 +1,10 @@
+[
+  {
+    "function": "rs_numbering_mapping",
+    "kwargs": {}
+  },
+  {
+    "function": "rs_numbering_answer_tag",
+    "kwargs": {}
+  }
+]

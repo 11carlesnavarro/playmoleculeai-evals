@@ -1,0 +1,10 @@
+[
+  {
+    "function": "rs_absent_result",
+    "kwargs": {}
+  },
+  {
+    "function": "rs_absent_answer_tag",
+    "kwargs": {}
+  }
+]

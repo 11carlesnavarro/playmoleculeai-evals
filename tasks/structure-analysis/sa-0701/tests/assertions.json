@@ -1,0 +1,22 @@
+[
+  {
+    "function": "sa0701_pocket_residues",
+    "kwargs": {}
+  },
+  {
+    "function": "sa0701_center",
+    "kwargs": {}
+  },
+  {
+    "function": "sa0701_res_hydrophobic_fraction",
+    "kwargs": {}
+  },
+  {
+    "function": "sa0701_net_formal_charge",
+    "kwargs": {}
+  },
+  {
+    "function": "sa0701_closest_contact",
+    "kwargs": {}
+  }
+]

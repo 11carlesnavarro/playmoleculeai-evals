@@ -1,0 +1,17 @@
+# Phase 2 in Docker for little money: the cheapest case of each ported set, once (a few cents with gpt-6-luna).
+n_attempts: 1
+n_concurrent_trials: 4
+datasets:
+  - path: tasks/structure-analysis
+    task_names: [sa-0071]
+  - path: tasks/cheminformatics-analysis
+    task_names: [sar-descriptors]
+  - path: tasks/retrieval-and-selection
+    task_names: [rs-uniprot]
+  - path: tasks/3d-reasoning
+    task_names: [dr-0001]
+agents:
+  - import_path: pmai_evals.agent:PmaiAgent
+    model_name: gpt-6-luna
+    env:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}

@@ -1,0 +1,10 @@
+[
+  {
+    "function": "rs_chimera_composition",
+    "kwargs": {}
+  },
+  {
+    "function": "rs_chimera_mutations",
+    "kwargs": {}
+  }
+]

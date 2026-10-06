@@ -1,0 +1,10 @@
+[
+  {
+    "function": "sar_multistep_choice",
+    "kwargs": {}
+  },
+  {
+    "function": "sar_multistep_answer_tag",
+    "kwargs": {}
+  }
+]

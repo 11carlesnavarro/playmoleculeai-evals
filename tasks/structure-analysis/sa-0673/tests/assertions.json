@@ -1,0 +1,14 @@
+[
+  {
+    "function": "sa0673_pocket_residues",
+    "kwargs": {}
+  },
+  {
+    "function": "sa0673_hbonds",
+    "kwargs": {}
+  },
+  {
+    "function": "sa0673_hydrophobic",
+    "kwargs": {}
+  }
+]
