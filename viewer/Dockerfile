@@ -1,0 +1,8 @@
+# pmai-viewer: headless Chromium that opens the deployed PMView site, driven by viewer/server.py.
+# No PMView files here: the site (PMVIEW_URL) serves them.
+# Chromium and its libraries are in the image; the Python package is not.
+FROM mcr.microsoft.com/playwright/python:v1.58.0-noble
+RUN python3 -m pip install --no-cache-dir "playwright==1.58.0" "aiohttp>=3.10"
+COPY viewer/server.py /srv/viewer/
+EXPOSE 9000
+CMD ["python3", "/srv/viewer/server.py"]

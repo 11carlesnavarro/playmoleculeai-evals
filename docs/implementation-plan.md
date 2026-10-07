@@ -23,8 +23,9 @@ playmoleculeai-evals/
 ├── .env.example                  keys and eval account (never committed: .env)
 ├── image/Dockerfile              pmai-eval: sandbox + pmai + grader
 ├── viewer/                       phase 5
-│   ├── Dockerfile                pmai-viewer: pinned PMView build + Chromium + server
-│   └── server.py                 one origin for PMView (build, agent socket, files, /v3 proxy) + control API
+│   ├── Dockerfile                pmai-viewer: Chromium + server (PMView comes from the site)
+│   ├── server.py                 opens the PMView site; takes its agent socket and project files + control API
+│   └── compose.yaml              the sidecar service: a viewer job adds it as extra_docker_compose
 ├── config/<name>/agent_config.yaml   pmai configs, baked at /opt/pmai-config
 ├── src/pmai_evals/
 │   ├── agent.py                  Harbor agent (host side)
@@ -52,7 +53,7 @@ playmoleculeai-evals/
   the `.env` OpenAI key is archived (401), and then `populate_context_post_run` crashed on the read only `agent.db`, which stopped the trial before the verifier. Both causes are known; the crash is fixed. Run the smoke job again with a working key.
 - Phase 3: done. `sa-models` and `skills-ab` ran in Docker (results in the phase 3 section). The image now has the skills (it had none before).
 - Phase 4: done. The eval account is `carles` (the user's account, `PM_EMAIL` in `.env`); `scripts/eval_account.py check` logs in on the dev backend.
-- Phase 5: `pmai run --viewer-id` is in playmoleculeAI. `viewer/server.py` and its unit tests are done (2026-10-07). Next: the image (`viewer/Dockerfile`).
+- Phase 5: `pmai run --viewer-id` is in playmoleculeAI. The sidecar opens the deployed PMView site; the image, the compose file, the agent script change and the `trial.py` viewer functions are done, with unit tests. The 5.8 try passed on computer19 against production, with one pmai turn (2026-10-07). Next: 5.7, a Harbor run with the viewer.
 - The old harness is removed. All of it is in `/fast_shared/users/carles/data/playmoleculeAIdata/evals-archive-2026-10-05/`:
   - `repo-before-cleanup.tar.gz`: the repo before the cleanup (old src, tests, scripts, mining, development, docs, playwright). Not in it: `.env`, `playwright/.auth`, `.venv`, `.git`, bixbench fixtures.
   - `runs/`: the old run results (34 GB), the baseline for phase 2.
@@ -64,9 +65,9 @@ Files: `pyproject.toml`, `uv.lock`, `.env.example`, `.gitignore`, `.dockerignore
 
 Changes from the first plan:
 - `pyproject.toml` is new, with one dependency: `harbor==0.24.0`. `anthropic`, `pytest` and `ruff` are dev only, because `judge.py` runs in the image.
-- `.dockerignore` sends only `dist/`, `config/` and `src/` to the build. `eval_sets/` is 22 GB.
+- `.dockerignore` sends only `dist/`, `config/`, `src/` and `viewer/` to the build. `eval_sets/` is 22 GB.
 - `make image` builds the PMAI sdist first, then the wheel from it. A direct `uv build --wheel` reuses `playmoleculeAI/build/lib`, which still has `agents/builtin/{researcher,reviewer,scout}` (deleted from src). Then pmai fails on start: `researcher/AGENT.md: description: Unexpected keyword argument`.
-- `make lint` is new. `make viewer` comes with phase 5.
+- `make lint` is new. `make viewer`: phase 5.
 - `make run` exports `.env`, because Harbor reads `${VAR}` in job files from the process env `[checked]`. `HARBOR_TELEMETRY=off`: telemetry is on by default and sends job ids, models and cost.
 
 Checked: `uv run harbor --version` prints 0.24.0. `make -n` for all targets.
@@ -252,48 +253,50 @@ Plan page with diagrams: https://claude.ai/artifact/RUsrHQRhikRFa3q8DMA7gb
 
 ### How it works
 
-Each viewer task gets a second container, `viewer`. It runs the real PMView build in headless Chromium. The design needs no PMView source: only the built files from the `pmweb` image, and the agent's own viewer API.
+Each viewer task gets a second container, `viewer`. It opens the deployed PMView site (`PMVIEW_URL`, default `https://acellera.playmolecule.ai`) in headless Chromium and logs in as the eval account. We have no PMView files and read no PMView code: the browser loads the site as a user does.
 
-PMView sends every call to its own origin (`location.origin + /v3/...`) `[checked]`, so `viewer/server.py` is that origin:
+Playwright takes only two things away from the site, in the browser:
 
-| Path from PMView | Goes to |
+| Request from PMView | Goes to |
 |---|---|
-| `/` and assets | the PMView build (`/srv/pmview`) |
-| `/v3/agent/ws/<any id>` | the sidecar. It keeps this socket for the whole trial. |
-| `/v3/file/<project>/<path>` GET, PUT | the trial's project folder (`/files/<project>`, a shared volume) |
-| every other `/v3/...` | the dev backend, with the browser's cookies (the eval account) |
+| socket `/v3/agent/ws/<id>` (`route_web_socket`) | the sidecar, not the site's agent. It keeps this socket for the whole trial. |
+| `/v3/file/<project>/<path>` GET, PUT (`route`) | the trial's project folder (`/files/<project>`, a shared volume), not the site's bucket |
+| all else (app, login, CDNs, other projects) | the site, as for a user |
 
 One trial:
 
-1. The sidecar starts Chromium with WebGL on the CPU (SwiftShader), checks WebGL2, and logs in through its own proxy, so the browser keeps the cookies.
-2. The agent script calls `GET viewer:9000/open?project=app`. The sidecar opens PMView on the project and waits until PMView runs `print('ready')` through `pmview_run_python`: the socket is up and Pyodide has started. Else 503 with the reason.
+1. The sidecar starts Chromium with WebGL on the CPU (SwiftShader), checks WebGL2, and logs in with a `fetch` in the page, so Chromium keeps the cookies.
+2. The agent script calls `GET viewer:9000/open?project=app`. The sidecar sets the `PM_PROJECT` cookie, opens the site and waits until PMView runs `print('ready')` through `pmview_run_python`: the socket is up and Pyodide has started. Else 503 with the reason.
 3. On 200 the script adds `--viewer-id eval`. The sidecar connects to `ws://main:8100/v1/ws/eval` while pmai serves it and passes pmai's messages to PMView. Each result goes back to the one that sent the command.
 4. After pmai exits, the sidecar keeps the PMView socket (a ping every 25 s). The tests call `POST viewer:9000/python` and read the viewer with `pmv.get_viewer_state()`: the API that the agent uses. If PMView breaks this API, the agent breaks too, and the eval must find it.
 5. On `docker compose down`, the sidecar saves `final.png` next to `events.jsonl` in the artifacts folder.
 
-PMView facts `[checked]` (pmview origin/main cab37c5):
+The site:
+- `acellera.playmolecule.ai` serves a PMView build (`/assets/index-<hash>.js`) `[checked]`. The `ready` event in `events.jsonl` records the script names, so the hash is the PMView version under test.
+- `dev.acellera.playmolecule.ai` serves the PMView source through the Vite dev server (`/@vite/client`, `/src/index.jsx`) `[checked]`: the code can change during a run.
+- `PM_EMAIL` must log in on the site. The eval account `carles` logs in on dev and on production `[checked]`.
+
+PMView facts, seen on the dev site with Playwright `[checked]`:
 - Socket messages: `pmview_command` `{tool_name, arguments, chat_id, command_id}` gets `pmview_result` `{command_id, output | error}`; `ping` gets `pong`. There is no hello message.
-- PMView drops a socket with no message for 31 s and connects again, forever (1 s to 30 s). Close codes 1006, 1008, 4001, 4003, 4401, 4403 start an auth check.
-- PMView sends a result on the socket that it has when the tool ends. Thus a result can come on a new socket.
-- `pmview_run_python` returns `{stdout, stderr, result}`, with no size limit. Before Pyodide is ready, it returns at once with `stderr` "still starting". It does not need the Console tab.
-- `pmview_screenshot` returns `{success, fileContent}`, where `fileContent` is a data URI.
-- PMView puts the project in front of each file path: `/v3/file/<project>/<path>`. `pmview_save` sends `PUT` with a form field `file`.
-- The project comes from the `PM_PROJECT` cookie, else from `GET /v3/default-project`.
+- PMView opens its agent socket about 1 s after the first one again. A result can come on the new socket.
+- Before Pyodide is ready, `pmview_run_python` returns at once with output `{success: false, error: "The Python engine is still starting (20%)..."}`. Python was ready after 13 s on ws12.
+- `pmview_load` of a project file sends `GET /v3/file/<project>/<path>`. `pmview_save` sends `PUT /v3/file/<project>/<dir>/<name>`, a multipart form with the field `file`.
 - jQuery, Pyodide 0.29.3 and other scripts come from CDNs, so the sidecar needs internet.
-- pmbackend sets all cookies with `SameSite=strict`. `Domain` and `Secure` depend on its config, so the proxy removes both.
+- From the pmview code (cab37c5), not seen: PMView drops a socket with no message for 31 s and connects again.
 
 Failures are infra errors, not a score of 0:
 
 | Risk | Guard |
 |---|---|
 | No WebGL2: Mol* draws a flat image and shows no error | WebGL2 gate at start: read the renderer name |
+| Login fails, site down | `broken` with the reason: `/open` gives 503 |
 | PMView not ready (Pyodide, CDNs) | `/open` waits for the socket and a Python probe, at most `READY_TIMEOUT` (300 s). Else 503 with the last reason and the last failed request. |
 | Page crash, browser gone | Playwright events set `broken`. Then `/open`, `/python` and `/screenshot` give 503. |
-| No message on the socket for 31 s | the sidecar pings every 25 s |
-| Refused handshake (1006) starts PMView's auth loop | the sidecar always accepts the socket |
+| No message on the socket for 31 s | the sidecar pings every 25 s. Checked: a command after 70 s with no other message works. |
 | PMView not connected when pmai sends a command | after 30 s, an error result goes to pmai: "The viewer is not connected." |
+| A service worker answers a request: the routes do not see it | the context blocks service workers |
 
-No Playwright trace: a trace records the login form (with the password) and the auth cookies `[checked]`.
+No Playwright trace: a trace records the login form (with the password) and the auth cookies `[checked]`. The sidecar logs the socket URL without its query (it has the csrf token).
 
 ### 5.1 PMAI: `--viewer-id` (done)
 
@@ -301,75 +304,54 @@ In playmoleculeAI `cli.py` (d5a3f3fb, pushed by the user). `pmai run --viewer-id
 
 ### 5.2 `viewer/server.py` and `tests/test_viewer_server.py` (done)
 
-The files are the reference. Environment: `PM_BACKEND_URL`, `PM_EMAIL`, `PM_PASSWORD`, `AGENT_WS` (default `ws://main:8100/v1/ws/eval`), `PMVIEW_STATIC`, `FILES_ROOT`, `EVIDENCE_DIR`, `READY_TIMEOUT`.
+The files are the reference. Environment: `PMVIEW_URL`, `PM_EMAIL`, `PM_PASSWORD`, `AGENT_WS` (default `ws://main:8100/v1/ws/eval`), `FILES_ROOT`, `EVIDENCE_DIR`, `READY_TIMEOUT`.
 
 Control API on `:9000`:
 
 | Call | Result |
 |---|---|
 | `GET /healthz` | 200 when the browser has started, or failed to start. Compose then starts `main`. |
-| `GET /open?project=P` | 200 `ready`, or 503 with the reason |
-| `POST /python` (body: code) | `{stdout, stderr, result}`. 503: infra error. 502: PMView gave an error. |
+| `GET /open?project=P` | 200 `ready`, or 503 with the reason. A 503 also when `FILES_ROOT/P` is missing. After a 503 every call gives the same 503. |
+| `POST /python` (body: code) | `{stdout, stderr, result}`. 502: PMView gave an error. Any other error: infra error. |
 | `GET /screenshot` | PNG |
 
 Checked:
 
 | Check | Result |
 |---|---|
-| Unit tests: fake PMView socket and fake pmai (ping, each result to its sender, a test command after pmai exits, 503 without PMView, project files, cookies) | 5 passed in 0.6 s |
-| Browser part on ws12: Playwright 1.58.0, its Chromium, the dev backend | renderer "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)...))"; the browser has `access_token`, `csrf_token`, `refresh_token`; `user-info` through the proxy: 200 |
+| Unit tests: fake PMView socket and fake pmai (ping, each result to its sender, a new PMView socket, a test command after pmai exits, 503 without PMView, project files GET and PUT) | 4 passed in 0.6 s |
+| `server.py` on ws12 against `dev.acellera.playmolecule.ai`: Playwright 1.58.0, its Chromium | login 200; `/open` ready in 13.8 s; `Molecule('1crn')` as cartoon in `pmv.get_viewer_state()`; `pmview_load` of a project file and `pmview_save` back to the project folder; a command after 70 s idle; `/screenshot` PNG; no csrf token and no password in `events.jsonl` |
 
-Not checked yet (needs the image): the PMView build path in the `pmweb` image, Mol* speed with SwiftShader, `/open` on a real PMView.
+The image on computer19 against production (2026-10-07, by the user, 5.8 with `--network host`) `[checked]`:
+- `/healthz` ok, `/open` ready, `/python` ran, `/screenshot` PNG.
+- One `pmai run --viewer-id eval` turn (gpt-6-luna, in `pmai-eval:latest`): `run_bash` downloaded 1CRN to `structures/`, `pmview_load` loaded it from the trial folder through the route, `pmview_run_python` set the style. After the turn, `pmv.get_viewer_state()` gave the system `1CRN_assembly1.pdb` with style `cartoon`.
 
-### 5.3 `viewer/Dockerfile` and `make viewer` (next)
+Not checked yet: a Harbor trial with `viewer/compose.yaml`.
 
-```dockerfile
-# The PMView version under test: pin this digest for release runs.
-FROM europe-southwest1-docker.pkg.dev/repositories-368911/acellera-docker-apps/pmweb:latest AS pmweb
+### 5.3 `viewer/Dockerfile` and `make viewer` (written)
 
-FROM mcr.microsoft.com/playwright/python:v1.58.0-noble
-RUN pip install --no-cache-dir "aiohttp>=3.10" "playwright==1.58.0"
-# [verify] the build path in pmweb
-COPY --from=pmweb /usr/share/nginx/html /srv/pmview
-COPY viewer/server.py /srv/viewer/
-EXPOSE 8080 9000
-CMD ["python", "/srv/viewer/server.py"]
-```
+`make viewer` builds `pmai-viewer:latest`: the Playwright 1.58.0 image and `server.py`. The image has Chromium in `/ms-playwright`, but not the Python package, so the Dockerfile installs `playwright==1.58.0` (the same version as the browsers) and `aiohttp`. No PMView files: the site serves them.
 
-### 5.4 Compose file for viewer tasks
+### 5.4 `viewer/compose.yaml` (written)
 
-Harbor runs `docker compose` with the process env, so `${VAR}` works here `[checked]`. It also sets `HOST_ARTIFACTS_PATH` from its own `/logs/artifacts` mount `[checked]`. The named volume is filled from the image's `/app` on first use.
+A viewer job adds the file:
 
 ```yaml
-services:
-  main:
-    volumes: ["project:/app"]
-    depends_on:
-      viewer: {condition: service_healthy}
-  viewer:
-    image: pmai-viewer:latest
-    environment:
-      PM_BACKEND_URL: ${PM_BACKEND_URL}
-      PM_EMAIL: ${PM_EMAIL}
-      PM_PASSWORD: ${PM_PASSWORD}
-    volumes:
-      - project:/files/app
-      - ${HOST_ARTIFACTS_PATH}:/logs/artifacts
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/healthz')"]
-      interval: 5s
-      retries: 60
-volumes:
-  project:
+environment:
+  extra_docker_compose: [viewer/compose.yaml]
 ```
 
-### 5.5 `src/pmai_evals/agent.py`: stop on 503
+- Harbor runs compose with the process env, so `${PM*}` come from `.env` (`make run` exports it) `[checked]`. Harbor sets `HOST_ARTIFACTS_PATH` from its own `/logs/artifacts` mount `[checked]`.
+- `main` gets `VIEWER_URL=http://viewer:9000` and starts only when the viewer is healthy.
+- The project is a named volume: `/app` in `main`, `/files/app` in `viewer`. Docker fills it from the image's `/app` on first use. Harbor's `down --volumes` removes it.
+- The viewer container needs internet: the site and the CDNs.
+- The sidecar writes `viewer/events.jsonl` and `viewer/final.png` straight to the trial's artifacts folder. Harbor collects sidecar artifacts before the verifier, which is too early for `final.png` `[checked]`. `os.umask(0)` in `server.py`: on NFS the files belong to nobody, and the host user must still delete them.
 
-Today, when `/open` fails for any reason, the script runs pmai without the viewer. Change: no sidecar (connection refused) gives no viewer flags, as now; a sidecar that answers 503 stops the script with a non-zero exit and the reason. That is an infra error.
+### 5.5 `agent.py`: stop on 503 (written)
 
-### 5.6 `src/pmai_evals/trial.py`: the viewer through the agent's API
+The script opens the viewer only when `VIEWER_URL` is set: other tasks run as before. A 503 from `/open` stops the script with the reason on stderr; no answer stops it with a traceback. That is an infra error: Harbor records `NonZeroAgentExitCodeError` and still runs the verifier `[checked]`, and `trial.py` then raises `InfraError` (5.6).
 
-Replace `viewer_get("/state")` and `viewer_get("/selection")`. A 503 from the sidecar raises an infra error, not a failed assert.
+### 5.6 `trial.py`: the viewer through the agent's API (written)
 
 | Old check reads | New, in `trial.py` | Through |
 |---|---|---|
@@ -377,6 +359,14 @@ Replace `viewer_get("/state")` and `viewer_get("/selection")`. A 503 from the si
 | `artifact.viewer_selection()` | `viewer_selection()` | `pmv.get_viewer_selection()`. Before the first selection it raises `TypeError`: return `{}`. |
 | `artifact.load_system(name)` | `viewer_system(uuid)` | `pmv.get_system(uuid)`, written as PDB text |
 | final screenshot | `viewer_screenshot()` | `GET /screenshot` |
+| | `viewer_python(code)` | `POST /python`: `{stdout, stderr, result}` |
+
+Errors:
+
+| From the sidecar | In the test | Trial |
+|---|---|---|
+| no `VIEWER_URL`, no answer, any HTTP error but 502 | `InfraError` (in `reward.py`) | no `reward.json`: Harbor raises `RewardFileNotFoundError`, so the trial is an error, not 0 `[checked]`. The plugin prints the reasons. |
+| 502 (the PMView tool failed), a Python error in PMView | `RuntimeError` with the reason | the test fails: PMView broke the API that the agent uses |
 
 ### 5.7 Port molecular-visualization
 
@@ -397,18 +387,34 @@ make viewer && make run JOB=experiments/viewer.yaml
 
 `experiments/viewer.yaml`: 3 tasks, gpt-6-luna, 1 attempt, less than $0.05. The full set only after that sample passes.
 
+Open points from the phase 5 review (2026-10-07), to decide in this step:
+- `legacy.check` gives 0 for every exception. When `RunArtifact` gets the viewer methods, it must raise `InfraError` again, else an infra error becomes a 0.
+- The job adds `viewer/compose.yaml`. Harbor also merges a task's own `environment/docker-compose.yaml`: a viewer task could carry the file, and then a job with no viewer cannot run it.
+- The pmai socket (port 8100, id `eval`) is in `config/*/agent_config.yaml`, `agent.py` and `server.py`. A new config with no `port: 8100` breaks viewer tasks.
+- A failed `/open` is a `NonZeroAgentExitCodeError`, as a pmai crash. Harbor retries agent errors by default. Harbor's `ERROR_PATTERNS` can give it its own type.
+
 ### 5.8 Try the sidecar without Harbor
+
+One `pmai run` turn on the host with gpt-6-luna: less than $0.01.
 
 ```bash
 make viewer
-docker run --rm -p 8080:8080 -p 9000:9000 --env-file .env \
-  -e AGENT_WS=ws://host.docker.internal:8100/v1/ws/eval --add-host host.docker.internal:host-gateway \
-  -v /tmp/t1:/files pmai-viewer:latest
-curl "localhost:9000/open?project=app"
-cd /tmp/t1/app && pmai run --viewer-id eval --config /tmp/t1/home --prompt "Load PDB 1CRN in the viewer"
-curl --data "import json; print(json.dumps(pmv.get_viewer_state()))" localhost:9000/python
-curl -o shot.png localhost:9000/screenshot
+mkdir -p /tmp/t1/app /tmp/t1/home /tmp/t1/artifacts && cp config/default/agent_config.yaml /tmp/t1/home/
+# host network: on computer19 a -p port mapping connects but never answers (2026-10-07)
+docker run --rm --name pmai-viewer-try --network host --env-file .env \
+  -e AGENT_WS=ws://localhost:8100/v1/ws/eval \
+  -v /tmp/t1:/files -v /tmp/t1/artifacts:/logs/artifacts pmai-viewer:latest
+# second shell
+curl "localhost:9000/open?project=app"   # "ready", else 503 with the reason
+# pmai is not on the computer19 host: use the one in pmai-eval:latest
+docker run --rm --network host -e OPENAI_API_KEY -v /tmp/t1:/tmp/t1 -w /tmp/t1/app pmai-eval:latest \
+  pmai run --viewer-id eval --config /tmp/t1/home --model gpt-6-luna \
+  --prompt "Download PDB 1CRN and show it in the viewer as cartoon"
+curl --data "import json; print(json.dumps(pmv.get_viewer_state(), default=str))" localhost:9000/python
+curl -o /tmp/t1/shot.png localhost:9000/screenshot
 ```
+
+`/tmp/t1/artifacts/viewer/events.jsonl` has the sidecar events. `-e PMVIEW_URL=...` opens another site.
 
 **Done when:** molecular-visualization passes on Harbor at the old harness rate, and nobody opens a browser.
 
@@ -526,7 +532,7 @@ Every trial keeps a production `agent.db`: the analysis dashboard can load them 
 | Provider keys and the service token are in the container env. The local backend gives `os.environ` to bash, so the agent can read them. | 1, 6 | Eval only keys. Later: strip them in `LocalBackend`. |
 | The sandbox image user is not root | 1 | Restore `USER` in `image/Dockerfile`; set `[agent].user` if needed. |
 | Bucket file owner: the backend and the cluster must read what the container writes | 6 | Run the agent as the bucket owner uid (`[agent].user`). |
-| SwiftShader WebGL is slow, Pyodide takes time to load | 5 | `/open` waits up to 5 min; measure once. |
-| PMView changes under us | 5 | Pin the `pmweb` digest in `viewer/Dockerfile`. |
+| SwiftShader WebGL is slow, Pyodide takes time to load | 5 | `/open` waits up to 5 min. Measured on ws12: ready in 14 s. |
+| PMView changes under us | 5 | We test what the site serves. The `ready` event records its build (script hash). Use production, not the dev site (Vite dev server). |
 | Harbor 0.x changes fast | all | Keep `harbor==0.24.0`; read the changelog before an upgrade. |
 | Named compose volumes stay after a trial | 5 | `docker volume prune` in the nightly job. |

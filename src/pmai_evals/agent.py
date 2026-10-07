@@ -11,11 +11,15 @@ from pydantic import Field
 from pmai_evals import trial
 
 HOME = "/logs/agent/home"  # pmai config home: agent_config.yaml + agent.db, synced to the host
-# Viewer tasks only: the sidecar opens PMView on this project. No sidecar: fails at once.
-OPEN_VIEWER = (
-    'python3 -c "import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=600)" '
-    '"http://viewer:9000/open?project=$(basename "$PWD")" 2>/dev/null'
-)
+# Viewer tasks only (viewer/compose.yaml sets VIEWER_URL): the sidecar opens PMView on this project.
+# A 503 stops the script with the reason: an infra error, not a turn without the viewer.
+OPEN_VIEWER = """python3 -c '
+import sys, urllib.error, urllib.request
+try:
+    urllib.request.urlopen(sys.argv[1], timeout=600)
+except urllib.error.HTTPError as e:
+    sys.exit(f"viewer /open: {e.code} {e.read().decode()}")
+' "$VIEWER_URL/open?project=$(basename "$PWD")\""""
 
 
 class PmaiOptions(InstalledAgentOptions):
@@ -70,7 +74,10 @@ cp -r {o.pmai_config}/. {HOME}/
 echo {o.work} > /logs/agent/work_dir
 cd {o.work}
 FLAGS="{o.flags}"
-if {OPEN_VIEWER}; then FLAGS="$FLAGS --viewer-id eval"; fi
+if [ -n "${{VIEWER_URL:-}}" ]; then
+{OPEN_VIEWER}
+FLAGS="$FLAGS --viewer-id eval"
+fi
 pmai run $FLAGS --config {HOME} {model_flag} --output json \\
   --prompt {shlex.quote(instruction)} > /logs/agent/events.jsonl
 """,

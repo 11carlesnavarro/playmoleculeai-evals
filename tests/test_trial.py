@@ -1,8 +1,14 @@
 import json
 import shutil
 import sqlite3
+import threading
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import pytest
 
 from pmai_evals import trial
+from pmai_evals.reward import InfraError
 
 
 def make_db(path):
@@ -73,3 +79,58 @@ def test_read_only_folder(tmp_path):
     finally:
         for d in (clean.parent, killed.parent):
             d.chmod(0o755)
+
+
+@contextmanager
+def fake_viewer(routes: dict):
+    """The sidecar's control API: path -> (status, body). A POST body goes to routes["posted"]."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            status, body = routes[self.path]
+            self.send_response(status)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            routes["posted"] = self.rfile.read(int(self.headers["Content-Length"])).decode()
+            self.do_GET()
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, args=(0.01,), daemon=True).start()  # 0.01: fast shutdown
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_viewer(monkeypatch):
+    def python(stdout, stderr=""):
+        return 200, json.dumps({"stdout": stdout, "stderr": stderr, "result": None}).encode()
+
+    routes = {"/screenshot": (200, b"PNG")}
+    with fake_viewer(routes) as url:
+        monkeypatch.setattr(trial, "VIEWER", url)
+        routes["/python"] = python('{"systems": {}}\n')
+        assert trial.viewer_state() == {"systems": {}}
+        assert "pmv.get_viewer_state()" in routes["posted"]
+        assert trial.viewer_screenshot() == b"PNG"
+
+        routes["/python"] = python("", "NameError: name 'pmv' is not defined")
+        with pytest.raises(RuntimeError, match="NameError"):
+            trial.viewer_selection()
+        routes["/python"] = (502, b"pmview_run_python: Pyodide crashed")  # PMView broke its API: a fail
+        with pytest.raises(RuntimeError, match="502 pmview_run_python: Pyodide crashed"):
+            trial.viewer_state()
+        routes["/screenshot"] = (503, b"page crashed")
+        with pytest.raises(InfraError, match="503 page crashed"):
+            trial.viewer_screenshot()
+    with pytest.raises(InfraError, match="Connection refused"):
+        trial.viewer_state()
+    monkeypatch.setattr(trial, "VIEWER", None)
+    with pytest.raises(InfraError, match="the job must add"):
+        trial.viewer_state()

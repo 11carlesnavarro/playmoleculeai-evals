@@ -6,15 +6,18 @@ import re
 import shutil
 import sqlite3
 import tempfile
+import urllib.error
 import urllib.request
 from functools import cache
 from pathlib import Path
+
+from pmai_evals.reward import InfraError
 
 LOGS = Path(os.environ.get("TRIAL_LOGS", "/logs/agent"))  # set it to grade a hand run on the host
 DB = LOGS / "home" / "agent.db"
 _work = LOGS / "work_dir"
 WORK = Path(_work.read_text().strip()) if _work.exists() else Path("/app")
-VIEWER = "http://viewer:9000"
+VIEWER = os.environ.get("VIEWER_URL")  # viewer tasks only: viewer/compose.yaml sets it
 
 
 @cache
@@ -84,14 +87,48 @@ def cost_usd() -> float:
     return usage()["cost_usd"]
 
 
-def viewer_get(path: str) -> bytes:  # viewer tasks only (phase 5)
-    with urllib.request.urlopen(VIEWER + path, timeout=300) as r:
-        return r.read()
+def _viewer(path: str, data: bytes | None = None) -> bytes:
+    """The viewer sidecar's control API (viewer/server.py). A sidecar that cannot answer is an infra
+    error: the trial gets no reward, not a 0."""
+    if not VIEWER:
+        raise InfraError("no viewer: the job must add viewer/compose.yaml")
+    try:
+        with urllib.request.urlopen(VIEWER + path, data, timeout=300) as r:
+            return r.read()
+    except urllib.error.HTTPError as e:  # 502: the PMView tool failed. Else the sidecar cannot answer
+        error = RuntimeError if e.code == 502 else InfraError
+        raise error(f"viewer {path}: {e.code} {e.read().decode(errors='replace')}") from None
+    except OSError as e:
+        raise InfraError(f"viewer {path}: {e}") from e
 
 
-def viewer_state():
-    return json.loads(viewer_get("/state"))
+def viewer_python(code: str) -> dict:
+    """Run code in PMView, as the agent's pmview_run_python: {stdout, stderr, result}.
+    pmv, Molecule and np are already imported there."""
+    return json.loads(_viewer("/python", code.encode()))
 
 
-def viewer_selection():
-    return json.loads(viewer_get("/selection"))
+def _pmv(value: str, before: str = ""):
+    out = viewer_python(f"import json\n{before}\nprint(json.dumps({value}, default=str))")
+    try:
+        return json.loads(out["stdout"])
+    except (KeyError, ValueError):
+        raise RuntimeError(f"viewer python: {out.get('stderr') or out.get('error')}") from None
+
+
+def viewer_state() -> dict:  # {"systems", "tables", "plots", "files"}
+    return _pmv("pmv.get_viewer_state()")
+
+
+def viewer_selection() -> dict:
+    # TypeError: no selection yet
+    return _pmv("dict(s or {})", "try:\n    s = pmv.get_viewer_selection()\nexcept TypeError:\n    s = None")
+
+
+def viewer_system(uuid: str) -> str:
+    """A system in the viewer, as PDB text."""
+    return _pmv("open('/tmp/eval.pdb').read()", f"pmv.get_system({uuid!r}).write('/tmp/eval.pdb')")
+
+
+def viewer_screenshot() -> bytes:  # PNG
+    return _viewer("/screenshot")

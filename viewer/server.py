@@ -1,7 +1,10 @@
-"""Viewer sidecar: the real PMView in headless Chromium, for one trial.
+"""Viewer sidecar: the deployed PMView site in headless Chromium, for one trial.
 
-:8080  the PMView origin. PMView sends every call to its own origin, so this server is its backend:
-       the PMView build, the agent socket, the project files, and the dev backend for the rest.
+The browser opens the site (PMVIEW_URL) and logs in as the eval account. We have no PMView files or
+code. Playwright takes only two things away from the site:
+- PMView's agent socket (/v3/agent/ws/...): PMView talks to this sidecar, not to the site's agent.
+- the trial project's files (/v3/file/<project>/...): the shared project folder, not the site's bucket.
+
 :9000  control, for the agent script and the tests: /healthz, /open?project=P, POST /python, /screenshot.
 
 The sidecar owns PMView's agent socket for the whole trial. During `pmai run` it passes pmai's viewer
@@ -12,36 +15,38 @@ commands through; before and after, the tests send their own. A browser problem 
 import asyncio
 import base64
 import contextlib
+import email.policy
 import json
 import os
-import re
 import signal
 import time
+import urllib.parse
 import uuid
 from pathlib import Path
 
 import aiohttp
 from aiohttp import web
 
-BACKEND = os.environ.get("PM_BACKEND_URL", "http://computer19.acellera.lan:8002")
+SITE = (os.environ.get("PMVIEW_URL") or "https://acellera.playmolecule.ai").rstrip("/")  # empty: default
 AGENT_WS = os.environ.get("AGENT_WS", "ws://main:8100/v1/ws/eval")  # pmai run --viewer-id eval
-STATIC = Path(os.environ.get("PMVIEW_STATIC", "/srv/pmview"))  # the PMView build
 FILES = Path(os.environ.get("FILES_ROOT", "/files"))  # <project>/<path>, as in a backend bucket
 EVIDENCE = Path(os.environ.get("EVIDENCE_DIR", "/logs/artifacts/viewer"))
 READY_TIMEOUT = float(os.environ.get("READY_TIMEOUT", 300))  # SwiftShader, Pyodide from CDNs: slow
-ORIGIN = "http://localhost:8080"
 PING_EVERY = 25  # PMView drops a socket with no message for 31 s
-CONNECT_TIMEOUT = 30  # as pmai: a command waits this long for PMView to (re)connect
+CONNECT_TIMEOUT = 30  # as pmai: a command waits this long for PMView to connect
 COMMAND_TIMEOUT = 120  # as pmai
-# not passed on by the proxy: aiohttp sets them, or they name this origin
-DROP = {"host", "origin", "referer", "connection", "keep-alive", "upgrade", "transfer-encoding",
-        "content-length", "content-encoding", "accept-encoding"}
 WEBGL2 = """() => {
   const gl = document.createElement("canvas").getContext("webgl2");
   if (!gl) return null;
   const d = gl.getExtension("WEBGL_debug_renderer_info");
   return gl.getParameter(d ? d.UNMASKED_RENDERER_WEBGL : gl.RENDERER);
 }"""
+LOGIN = """async ([username, password]) => {
+  const csrf = (await (await fetch("/v3/auth/csrf")).json()).csrf_token;
+  const body = new URLSearchParams({username, password});
+  return (await fetch("/v3/auth/login", {method: "POST", headers: {"X-CSRF-Token": csrf}, body})).status;
+}"""
+SCRIPTS = "() => [...document.scripts].map(s => s.src).filter(Boolean)"  # the deployed PMView build
 
 
 def log(event: str, **fields) -> None:
@@ -64,17 +69,24 @@ class Viewer:
     """PMView's agent socket. PMView reconnects when a socket dies, and pmai comes and goes."""
 
     def __init__(self) -> None:
-        self.ws: web.WebSocketResponse | None = None
+        self.ws = None  # Playwright's WebSocketRoute: the newest socket from PMView
         self.connected = asyncio.Event()
+        self.inbox: asyncio.Queue = asyncio.Queue()  # PMView's messages, from all its sockets
         self.agent: aiohttp.ClientWebSocketResponse | None = None  # pmai, during `pmai run`
         self.waiting: dict[str, asyncio.Future] = {}  # our own commands
 
+    def connect(self, ws) -> None:
+        """Playwright gives us each socket that PMView opens. Nothing goes to the site's agent.
+        No on_close: Playwright 1.58 fails on a close with no reason. A dead socket gives a time out."""
+        self.ws = ws
+        self.connected.set()
+        ws.on_message(self.inbox.put_nowait)
+        log("pmview_connected", url=ws.url.split("?")[0])  # the query has the csrf token
+
     async def send(self, message: dict) -> None:
-        """To PMView. Waits for it to (re)connect, as pmai does."""
+        """To PMView. Waits for it to connect, as pmai does."""
         await asyncio.wait_for(self.connected.wait(), CONNECT_TIMEOUT)
-        if self.ws is None:
-            raise ConnectionError("PMView closed its socket")
-        await self.ws.send_json(message)
+        self.ws.send(json.dumps(message))
 
     async def call(self, tool_name: str, timeout: float = COMMAND_TIMEOUT, **arguments) -> dict:
         """A viewer tool, with the message that pmai sends. Returns PMView's output."""
@@ -90,39 +102,20 @@ class Viewer:
             raise ToolFailed(result["error"])
         return result.get("output") or {}
 
-    async def from_pmview(self, message: dict) -> None:
+    async def from_pmview(self) -> None:
         """A result goes to the call that sent the command, else to pmai. A result can come on a
         new socket: PMView answers on the socket it has when the tool ends."""
-        if message.get("type") != "pmview_result":
-            return  # pong
-        answer = self.waiting.get(message.get("command_id"))
-        if answer is not None:
-            if not answer.done():
-                answer.set_result(message)
-        elif self.agent is not None:
-            with contextlib.suppress(ConnectionError):  # pmai exits: its command is gone with it
-                await self.agent.send_json(message)
-
-
-async def pmview_socket(request: web.Request) -> web.WebSocketResponse:
-    """/v3/agent/ws/{id}: PMView's agent socket, and each reconnect. Always accept it: a refused
-    handshake (close 1006) starts PMView's auth recovery loop."""
-    viewer = request.app[VIEWER]
-    ws = web.WebSocketResponse()
-    await ws.prepare(request)
-    viewer.ws = ws
-    viewer.connected.set()
-    log("pmview_connected", id=request.match_info["id"])
-    try:
-        async for msg in ws:
-            if msg.type == aiohttp.WSMsgType.TEXT:
-                await viewer.from_pmview(msg.json())
-    finally:
-        if viewer.ws is ws:
-            viewer.ws = None
-            viewer.connected.clear()
-            log("pmview_disconnected", code=ws.close_code)
-    return ws
+        while True:
+            message = json.loads(await self.inbox.get())
+            if message.get("type") != "pmview_result":
+                continue  # pong
+            answer = self.waiting.get(message.get("command_id"))
+            if answer is not None:
+                if not answer.done():
+                    answer.set_result(message)
+            elif self.agent is not None:
+                with contextlib.suppress(ConnectionError):  # pmai exits: its command is gone with it
+                    await self.agent.send_json(message)
 
 
 async def keepalive(viewer: Viewer) -> None:
@@ -130,8 +123,7 @@ async def keepalive(viewer: Viewer) -> None:
     while True:
         await asyncio.sleep(PING_EVERY)
         if viewer.ws is not None:
-            with contextlib.suppress(ConnectionError):
-                await viewer.ws.send_json({"type": "ping"})
+            viewer.ws.send(json.dumps({"type": "ping"}))
 
 
 async def bridge(viewer: Viewer, http: aiohttp.ClientSession, url: str) -> None:
@@ -161,81 +153,44 @@ async def from_pmai(viewer: Viewer, agent: aiohttp.ClientWebSocketResponse, mess
         return
     try:
         await viewer.send(message)  # commands, and the job messages that PMView shows
-    except (TimeoutError, ConnectionError):
+    except TimeoutError:
         if command_id := message.get("command_id"):  # a clear error now, not pmai's 120 s time limit
             error = "The viewer is not connected."
             await agent.send_json({"type": "pmview_result", "command_id": command_id, "error": error})
 
 
-# ---- :8080, the PMView origin ----------------------------------------------------------------
+# ---- the trial's project files -------------------------------------------------------------------
 
 
-def local_cookie(header: str) -> str:
-    """The backend's cookies can carry its Domain and Secure: drop both, so they stay on this origin."""
-    return re.sub(r";\s*(Domain=[^;]*|Secure)(?=;|$)", "", header, flags=re.I)
+def form_file(content_type: str, body: bytes) -> bytes:
+    """The `file` field of a multipart form (pmview_save)."""
+    form = email.message_from_bytes(f"Content-Type: {content_type}\r\n\r\n".encode() + body,
+                                    policy=email.policy.HTTP)
+    for part in form.iter_parts():
+        if part.get_param("name", header="content-disposition") == "file":
+            return part.get_payload(decode=True)
+    raise ValueError("no file field in the form")
 
 
-def project_file(path: str) -> Path | None:
-    """`<project>/<path>` in FILES when the project is here (the trial's own). Else None: the backend's."""
-    root = FILES.resolve()
-    project = path.split("/", 1)[0]
-    if not project or not (root / project).is_dir():
-        return None
+async def project_files(route) -> None:
+    """Playwright route for /v3/file/**: GET (pmview_load) and PUT (pmview_save) in the trial project,
+    `<project>/<path>` in FILES. Another project is the site's."""
+    request = route.request
+    path = urllib.parse.unquote(urllib.parse.urlsplit(request.url).path).removeprefix("/v3/file/")
+    root, name = FILES.resolve(), path.split("/", 1)[0]
+    if not name or not (root / name).is_dir():
+        return await route.fallback()
     file = (root / path).resolve()
-    if not file.is_relative_to(root / project):
-        raise web.HTTPForbidden()
-    return file
-
-
-async def proxy(request: web.Request) -> web.StreamResponse:
-    """Every other /v3 call goes to the dev backend, with the browser's cookies: the eval account."""
-    headers = {k: v for k, v in request.headers.items() if k.lower() not in DROP}
-    body = await request.read() if request.body_exists else None
-    try:
-        url = BACKEND + request.rel_url.path_qs
-        async with request.app[HTTP].request(
-            request.method, url, headers=headers, data=body, allow_redirects=False
-        ) as upstream:
-            response = web.StreamResponse(status=upstream.status, reason=upstream.reason)
-            for k, v in upstream.headers.items():
-                if k.lower() not in DROP:
-                    response.headers.add(k, local_cookie(v) if k.lower() == "set-cookie" else v)
-            await response.prepare(request)
-            async for chunk in upstream.content.iter_any():  # also server-sent events
-                await response.write(chunk)
-            await response.write_eof()
-            return response
-    except aiohttp.ClientError as error:
-        log("backend_error", path=request.path, error=repr(error))
-        raise web.HTTPBadGateway(text=f"dev backend: {error!r}") from error
-
-
-async def file_get(request: web.Request) -> web.StreamResponse:
-    file = project_file(request.match_info["path"])
-    if file is None:
-        return await proxy(request)
-    if not file.is_file():
-        raise web.HTTPNotFound()
-    return web.FileResponse(file)
-
-
-async def file_put(request: web.Request) -> web.StreamResponse:
-    """pmview_save: a form with one `file`."""
-    file = project_file(request.match_info["path"])
-    if file is None:
-        return await proxy(request)
-    form = await request.post()
+    if not file.is_relative_to(root / name):
+        return await route.fulfill(status=403)
+    if request.method not in ("GET", "PUT"):
+        return await route.fallback()
+    if request.method == "GET":
+        return await (route.fulfill(path=file) if file.is_file() else route.fulfill(status=404))
     file.parent.mkdir(parents=True, exist_ok=True)
-    file.write_bytes(form["file"].file.read())
-    log("file_saved", path=request.match_info["path"])
-    return web.json_response({})
-
-
-async def pmview_build(request: web.Request) -> web.FileResponse:
-    """The PMView build. Any other path is a page of the app."""
-    root = STATIC.resolve()
-    file = (root / request.match_info["path"]).resolve()
-    return web.FileResponse(file if file.is_relative_to(root) and file.is_file() else root / "index.html")
+    file.write_bytes(form_file(request.headers["content-type"], request.post_data_buffer or b""))
+    log("file_saved", path=path)
+    await route.fulfill(json={})
 
 
 # ---- the browser ---------------------------------------------------------------------------------
@@ -253,15 +208,15 @@ class Browser:
         log("broken", reason=reason)
         self.broken = self.broken or reason
 
-    async def start(self) -> None:
+    async def start(self, viewer: Viewer) -> None:
         try:
-            await self._start()
+            await self._start(viewer)
         except Exception as error:
             self.fail(f"browser start: {error!r}")
         finally:
             self.started.set()
 
-    async def _start(self) -> None:
+    async def _start(self, viewer: Viewer) -> None:
         from playwright.async_api import async_playwright  # in the image only, not in the unit tests
 
         self.playwright = await async_playwright().start()
@@ -270,7 +225,11 @@ class Browser:
         )  # never --disable-gpu: it turns WebGL off
         chromium.on("disconnected", lambda _: self.fail("the browser is gone"))
         # no Playwright trace: it records the login form and the auth cookies
-        self.context = await chromium.new_context(viewport={"width": 1280, "height": 800})
+        # service workers blocked: a request that a service worker answers skips the routes
+        self.context = await chromium.new_context(viewport={"width": 1280, "height": 800},
+                                                  service_workers="block")
+        await self.context.route_web_socket("**/v3/agent/ws/**", viewer.connect)
+        await self.context.route("**/v3/file/**", project_files)
         self.page = page = await self.context.new_page()
         page.on("crash", lambda _: self.fail("the page crashed"))
         page.on("pageerror", lambda error: log("page_error", text=str(error)))
@@ -288,17 +247,16 @@ class Browser:
         self.failed_url = request.url
 
     async def login(self) -> None:
-        """Through our own proxy, as PMView does it: the browser keeps the cookies."""
-        api = self.context.request
-        csrf = (await (await api.get(f"{ORIGIN}/v3/auth/csrf")).json())["csrf_token"]
-        form = {"username": os.environ["PM_EMAIL"], "password": os.environ["PM_PASSWORD"]}
-        r = await api.post(f"{ORIGIN}/v3/auth/login", form=form, headers={"X-CSRF-Token": csrf})
-        if not r.ok:
-            self.fail(f"login to {BACKEND}: HTTP {r.status}")
+        """In the page, so Chromium keeps the cookies. Playwright's own HTTP client cannot verify the dev
+        site: it sends no intermediate certificate. A small JSON page of the site, not the whole app."""
+        await self.page.goto(f"{SITE}/v3/auth/csrf")
+        status = await self.page.evaluate(LOGIN, [os.environ["PM_EMAIL"], os.environ["PM_PASSWORD"]])
+        if status != 200:
+            self.fail(f"login to {SITE}: HTTP {status}")
 
     async def open(self, project: str) -> None:
-        await self.context.add_cookies([{"name": "PM_PROJECT", "value": project, "url": ORIGIN}])
-        await self.page.goto(ORIGIN, wait_until="commit")  # ready means: PMView runs Python
+        await self.context.add_cookies([{"name": "PM_PROJECT", "value": project, "url": SITE}])
+        await self.page.goto(SITE, wait_until="commit")  # ready means: PMView runs Python
 
     async def close(self) -> None:
         """Keep the last frame as evidence. The browser can be dead, or never started."""
@@ -317,11 +275,12 @@ async def until_ready(viewer: Viewer, browser: Browser, deadline: float) -> None
     while time.monotonic() < deadline:
         if browser.broken:
             raise Unavailable(browser.broken)
-        with contextlib.suppress(TimeoutError, ConnectionError):
+        with contextlib.suppress(TimeoutError):
             output = await viewer.call("pmview_run_python", timeout=30, code="print('ready')")
             if "ready" in (output.get("stdout") or ""):
                 return
-            why = output.get("stderr") or "no output from PMView's Python"  # "still starting (40%)"
+            # "The Python engine is still starting (20%)..."
+            why = output.get("error") or output.get("stderr") or "no output from PMView's Python"
         await asyncio.sleep(2)
     last = f"; last failed request: {browser.failed_url}" if browser.failed_url else ""
     raise Unavailable(f"not ready after {READY_TIMEOUT:.0f} s: {why}{last}")
@@ -338,18 +297,22 @@ async def healthz(request: web.Request) -> web.Response:
 async def open_project(request: web.Request) -> web.Response:
     """The agent script calls this before `pmai run`: PMView on the project, able to run Python.
     Else 503 with the reason, and the script stops."""
-    viewer, browser = request.app[VIEWER], request.app[BROWSER]
+    viewer, browser, project = request.app[VIEWER], request.app[BROWSER], request.query["project"]
     start = time.monotonic()
     try:
+        if not (FILES / project).is_dir():  # else the project files would come from the site
+            raise Unavailable(f"no project {project} in {FILES}: see the volumes in viewer/compose.yaml")
         await asyncio.wait_for(browser.started.wait(), READY_TIMEOUT)
         if browser.broken:
             raise Unavailable(browser.broken)
-        await browser.open(request.query["project"])
+        await browser.open(project)
         await until_ready(viewer, browser, start + READY_TIMEOUT)
+        scripts = await browser.page.evaluate(SCRIPTS)
     except Exception as error:
-        log("not_ready", reason=str(error) or repr(error))
-        raise web.HTTPServiceUnavailable(text=str(error) or repr(error)) from error
-    log("ready", project=request.query["project"], seconds=round(time.monotonic() - start, 1))
+        browser.fail(str(error) or repr(error))  # the tests then get a 503 too, not a viewer with no project
+        raise web.HTTPServiceUnavailable(text=browser.broken) from error
+    seconds = round(time.monotonic() - start, 1)
+    log("ready", project=project, seconds=seconds, site=SITE, scripts=scripts)
     return web.Response(text="ready")
 
 
@@ -359,7 +322,7 @@ async def tool(request: web.Request, tool_name: str, **arguments) -> dict:
         raise web.HTTPServiceUnavailable(text=reason)
     try:
         return await request.app[VIEWER].call(tool_name, **arguments)
-    except (TimeoutError, ConnectionError) as error:
+    except TimeoutError as error:
         raise web.HTTPServiceUnavailable(text=f"{tool_name}: no answer from PMView ({error!r})") from error
     except ToolFailed as error:
         raise web.HTTPBadGateway(text=f"{tool_name}: {error}") from error
@@ -382,20 +345,6 @@ async def screenshot(request: web.Request) -> web.Response:
 
 VIEWER = web.AppKey("viewer", Viewer)
 BROWSER = web.AppKey("browser", Browser)
-HTTP = web.AppKey("http", aiohttp.ClientSession)
-
-
-def origin_app(viewer: Viewer, http: aiohttp.ClientSession) -> web.Application:
-    app = web.Application(client_max_size=2**30)  # pmview_save sends whole systems
-    app[VIEWER], app[HTTP] = viewer, http
-    app.add_routes([
-        web.get("/v3/agent/ws/{id}", pmview_socket),
-        web.get("/v3/file/{path:.+}", file_get),
-        web.put("/v3/file/{path:.+}", file_put),
-        web.route("*", "/v3/{path:.*}", proxy),
-        web.get("/{path:.*}", pmview_build),
-    ])
-    return app
 
 
 def control_app(viewer: Viewer, browser: Browser) -> web.Application:
@@ -411,26 +360,25 @@ def control_app(viewer: Viewer, browser: Browser) -> web.Application:
 
 
 async def main() -> None:
+    os.umask(0)  # root here can be nobody on the host (NFS): the host user must still delete the evidence
     EVIDENCE.mkdir(parents=True, exist_ok=True)
     viewer, browser = Viewer(), Browser()
     stop = asyncio.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):  # docker compose down: keep the evidence first
         asyncio.get_running_loop().add_signal_handler(sig, stop.set)
-    timeout = aiohttp.ClientTimeout(total=None, sock_connect=30)  # server-sent events stay open
-    async with aiohttp.ClientSession(cookie_jar=aiohttp.DummyCookieJar(), timeout=timeout) as http:
-        runners = []
-        for app, port in ((origin_app(viewer, http), 8080), (control_app(viewer, browser), 9000)):
-            runners.append(web.AppRunner(app))
-            await runners[-1].setup()
-            await web.TCPSite(runners[-1], "0.0.0.0", port).start()
-        tasks = [asyncio.create_task(keepalive(viewer)), asyncio.create_task(bridge(viewer, http, AGENT_WS))]
-        await browser.start()  # after the servers: the login goes through the proxy
+    timeout = aiohttp.ClientTimeout(total=None, sock_connect=30)  # the pmai socket stays open for the turn
+    async with aiohttp.ClientSession(timeout=timeout) as http:
+        runner = web.AppRunner(control_app(viewer, browser))
+        await runner.setup()
+        await web.TCPSite(runner, "0.0.0.0", 9000).start()
+        tasks = [asyncio.create_task(t) for t in
+                 (viewer.from_pmview(), keepalive(viewer), bridge(viewer, http, AGENT_WS))]
+        await browser.start(viewer)
         await stop.wait()
         await browser.close()
         for task in tasks:
             task.cancel()
-        for runner in runners:
-            await runner.cleanup()
+        await runner.cleanup()
 
 
 if __name__ == "__main__":

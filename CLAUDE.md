@@ -5,7 +5,7 @@ Evals for playmoleculeAI. Harbor runs `pmai run` in one container per case, and 
 ## Commands
 
 - `make test`, `make lint`: unit tests and ruff (no Docker).
-- `make image`: pmai-eval:latest (needs Docker and `../playmoleculeAI`).
+- `make image`: pmai-eval:latest (needs Docker and `../playmoleculeAI`). `make viewer`: pmai-viewer:latest (viewer tasks).
 - `make run JOB=experiments/smoke.yaml`, `make view`.
 - Grade a hand run without Docker: `TRIAL_LOGS=<logs dir> REWARD_JSON=<file> uv run pytest tasks/<set>/<case>/tests -p pmai_evals.reward` (see the README).
 

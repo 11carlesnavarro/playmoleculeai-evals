@@ -7,7 +7,7 @@ JOB ?= experiments/smoke.yaml
 # a new jobs/ folder per run; NAME=<an old job> resumes that job (Harbor keeps its finished trials)
 NAME ?= $(basename $(notdir $(JOB)))-$(shell date +%Y%m%d-%H%M%S)
 
-.PHONY: image run view test lint
+.PHONY: image viewer run view test lint
 
 # sdist first, then the wheel from it: a direct wheel build reuses $(PMAI)/build/lib,
 # which keeps files deleted from src
@@ -16,6 +16,9 @@ image:  ## pmai-eval:latest = sandbox image + pmai + grader + skills
 	git -C $(SKILLS) archive $(SKILLS_REF) skills | tar -x -C dist
 	echo "skills: $(SKILLS_REF) $$(git -C $(SKILLS) log -1 --format='%h %ad %s' --date=short $(SKILLS_REF))"
 	docker build -t pmai-eval:latest --build-arg SANDBOX=$(SANDBOX) -f image/Dockerfile .
+
+viewer:  ## pmai-viewer:latest = headless Chromium + viewer/server.py (PMView comes from the site)
+	docker build -t pmai-viewer:latest -f viewer/Dockerfile .
 
 run:  ## make run JOB=experiments/smoke.yaml
 	set -a && . ./.env && set +a && HARBOR_TELEMETRY=off uv run harbor run -c $(JOB) --job-name $(NAME)

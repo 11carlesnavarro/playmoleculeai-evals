@@ -22,3 +22,17 @@ def test_reward(pytester, tmp_path, monkeypatch):
         "test_half": 0.5,
         "test_setup_error": 0.0,
     }
+
+
+def test_infra_error_gives_no_reward(pytester, tmp_path, monkeypatch):
+    out = tmp_path / "reward.json"
+    out.write_text("{}")  # from an old run
+    monkeypatch.setenv("REWARD_JSON", str(out))
+    pytester.makepyfile("""
+        from pmai_evals.reward import InfraError
+        def test_ok(): pass
+        def test_viewer(): raise InfraError("viewer /open: 503 no WebGL2")
+    """)
+    result = pytester.runpytest_subprocess("-p", "pmai_evals.reward")
+    assert not out.exists()
+    result.stdout.fnmatch_lines(["*infra error, no reward:*", "*test_viewer: viewer /open: 503 no WebGL2"])

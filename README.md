@@ -14,6 +14,7 @@ harbor run ──► trial container (pmai-eval image)
 ```bash
 cp .env.example .env              # add the keys
 make image                        # pmai-eval:latest (needs Docker and ../playmoleculeAI)
+make viewer                       # pmai-viewer:latest, for viewer tasks only (opens the PMView site)
 make run JOB=experiments/smoke.yaml
 make view                         # results in jobs/<job file>-<date>/
 uv run python scripts/compare_old.py jobs/<job>   # old harness vs new, per case
@@ -23,9 +24,11 @@ uv run python scripts/compare_old.py jobs/<job>   # old harness vs new, per case
 
 ```text
 image/Dockerfile                  sandbox image + pmai (/opt/pmai) + grader (/opt/grader) + skills
+viewer/                           viewer tasks: the PMView site in headless Chromium, next to the trial container
+                                  (Dockerfile, server.py, compose.yaml: a job adds it as extra_docker_compose)
 config/<name>/agent_config.yaml   pmai configs, baked at /opt/pmai-config
 src/pmai_evals/agent.py           the Harbor agent (host side)
-src/pmai_evals/trial.py           what a test asks about a trial: answer, tool calls, cost
+src/pmai_evals/trial.py           what a test asks about a trial: answer, tool calls, cost, viewer
 src/pmai_evals/reward.py          pytest plugin: one score per test, reward = mean
 src/pmai_evals/judge.py           LLM judge for what code cannot check
 src/pmai_evals/legacy.py          runs the old eval_sets checks.py functions unchanged

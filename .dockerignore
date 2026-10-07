@@ -3,4 +3,5 @@
 !dist/
 !config/
 !src/
+!viewer/
 **/__pycache__

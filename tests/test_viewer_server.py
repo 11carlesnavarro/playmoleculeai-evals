@@ -1,6 +1,7 @@
 """viewer/server.py with a fake PMView socket and a fake pmai: no browser."""
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
@@ -14,14 +15,24 @@ import server
 RESULT = {"type": "pmview_result"}
 
 
-async def fake_pmview(url, seen: list) -> None:
-    """PMView's end of the agent socket: runs each command at once and answers."""
-    async with aiohttp.ClientSession() as http, http.ws_connect(url) as ws:
-        async for msg in ws:
-            seen.append(message := msg.json())
-            if message["type"] == "pmview_command":
-                output = {"stdout": f"ran {message['arguments']['code']}"}
-                await ws.send_json({**RESULT, "command_id": message["command_id"], "output": output})
+class FakePMView:
+    """What Playwright gives for PMView's agent socket (a WebSocketRoute): PMView runs each command
+    at once and answers."""
+
+    url = "wss://site/v3/agent/ws/tab?csrf_token=secret"
+
+    def __init__(self):
+        self.seen = []
+
+    def on_message(self, handler):
+        self.answer = handler
+
+    def send(self, raw):
+        self.seen.append(message := json.loads(raw))
+        if message["type"] == "pmview_command":
+            output = {"stdout": f"ran {message['arguments']['code']}"}
+            reply = json.dumps({**RESULT, "command_id": message["command_id"], "output": output})
+            asyncio.get_running_loop().call_soon(self.answer, reply)
 
 
 def fake_pmai(got: asyncio.Queue, exited: asyncio.Event) -> web.Application:
@@ -57,17 +68,15 @@ async def sidecar():
     viewer, browser = server.Viewer(), server.Browser()
     browser.started.set()
     async with aiohttp.ClientSession() as http:
-        origin = TestServer(server.origin_app(viewer, http))
         control = TestClient(TestServer(server.control_app(viewer, browser)))
-        await origin.start_server()
         await control.start_server()
-        keepalive = asyncio.create_task(server.keepalive(viewer))
+        tasks = [asyncio.create_task(server.keepalive(viewer)), asyncio.create_task(viewer.from_pmview())]
         try:
-            yield SimpleNamespace(viewer=viewer, browser=browser, http=http, origin=origin, control=control)
+            yield SimpleNamespace(viewer=viewer, browser=browser, http=http, control=control)
         finally:
-            keepalive.cancel()
+            for task in tasks:
+                task.cancel()
             await control.close()
-            await origin.close()
 
 
 @pytest.fixture(autouse=True)
@@ -83,15 +92,13 @@ async def until(condition, timeout=5.0):
             await asyncio.sleep(0.01)
 
 
-def test_pings_pmview(tmp_path, monkeypatch):
+def test_pings_pmview(monkeypatch):
     monkeypatch.setattr(server, "PING_EVERY", 0.05)  # PMView drops a socket with no message for 31 s
 
     async def scenario():
         async with sidecar() as s:
-            seen = []
-            pmview = asyncio.create_task(fake_pmview(s.origin.make_url("/v3/agent/ws/tab"), seen))
-            await until(lambda: {"type": "ping"} in seen)
-            pmview.cancel()
+            s.viewer.connect(pmview := FakePMView())
+            await until(lambda: {"type": "ping"} in pmview.seen)
 
     asyncio.run(scenario())
 
@@ -99,7 +106,7 @@ def test_pings_pmview(tmp_path, monkeypatch):
 def test_each_result_goes_to_its_sender(tmp_path):
     async def scenario():
         async with sidecar() as s:
-            pmview = asyncio.create_task(fake_pmview(s.origin.make_url("/v3/agent/ws/tab"), []))
+            s.viewer.connect(FakePMView())
             got, exited = asyncio.Queue(), asyncio.Event()
             pmai = TestServer(fake_pmai(got, exited))
             await pmai.start_server()
@@ -109,6 +116,7 @@ def test_each_result_goes_to_its_sender(tmp_path):
             result = await asyncio.wait_for(got.get(), 5)
             assert result == {**RESULT, "command_id": "pmai-1", "output": {"stdout": "ran agent"}}
 
+            s.viewer.connect(FakePMView())  # PMView reconnects: the new socket is used
             r = await s.control.post("/python", data="during the turn")
             assert await r.json() == {"stdout": "ran during the turn"}
             assert got.empty()  # the tests' result does not go to pmai
@@ -118,19 +126,24 @@ def test_each_result_goes_to_its_sender(tmp_path):
             r = await s.control.post("/python", data="after the turn")
             assert await r.json() == {"stdout": "ran after the turn"}
             bridge.cancel()
-            pmview.cancel()
             await pmai.close()
 
     asyncio.run(scenario())
+    assert "secret" not in (tmp_path / "events.jsonl").read_text()
 
 
-def test_no_pmview_is_an_infra_error(tmp_path, monkeypatch):
+def test_no_pmview_is_an_infra_error(monkeypatch):
     monkeypatch.setattr(server, "CONNECT_TIMEOUT", 0.1)
 
     async def scenario():
         async with sidecar() as s:
             r = await s.control.post("/python", data="1")
             assert r.status == 503
+            r = await s.control.get("/open", params={"project": "other"})  # not in the shared volume
+            assert r.status == 503
+            r = await s.control.post("/python", data="1")  # after a failed /open: no wait, the reason
+            assert (r.status, await r.text()) == (503, f"no project other in {server.FILES}: see the "
+                                                       "volumes in viewer/compose.yaml")
             s.browser.broken = "no WebGL2: Mol* cannot draw"
             r = await s.control.get("/open", params={"project": "app"})
             assert (r.status, await r.text()) == (503, "no WebGL2: Mol* cannot draw")
@@ -138,23 +151,37 @@ def test_no_pmview_is_an_infra_error(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
+class FakeRoute:
+    """What Playwright gives for a /v3/file/ request."""
+
+    def __init__(self, method, url, body=None, content_type=""):
+        self.request = SimpleNamespace(method=method, url=url, post_data_buffer=body,
+                                       headers={"content-type": content_type})
+        self.done = None
+
+    async def fulfill(self, status=200, path=None, json=None):
+        self.done = (status, path.read_bytes() if path else json)
+
+    async def fallback(self):
+        self.done = "site"
+
+
 def test_project_files(tmp_path):
+    data = b"ATOM\r\n\x00\xff\nEND\n"  # bytes as they are: no line ending or encoding change
+    body = (b'--XyZ\r\nContent-Disposition: form-data; name="file"; filename="a.pdb"\r\n'
+            b"Content-Type: application/octet-stream\r\n\r\n" + data + b"\r\n--XyZ--\r\n")
+    site, form = "https://site/v3/file", "multipart/form-data; boundary=XyZ"
+
+    async def run(*args, **kwargs):
+        await server.project_files(route := FakeRoute(*args, **kwargs))
+        return route.done
+
     async def scenario():
-        async with sidecar() as s:
-            form = aiohttp.FormData()
-            form.add_field("file", b"ATOM", filename="a.pdb")
-            r = await s.http.put(s.origin.make_url("/v3/file/app/out/a.pdb"), data=form)
-            assert r.status == 200
-            assert (tmp_path / "files/app/out/a.pdb").read_bytes() == b"ATOM"
-            r = await s.http.get(s.origin.make_url("/v3/file/app/out/a.pdb"))
-            assert await r.read() == b"ATOM"
+        assert await run("PUT", f"{site}/app/out/a%20b.pdb", body, form) == (200, {})
+        assert (tmp_path / "files/app/out/a b.pdb").read_bytes() == data
+        assert await run("GET", f"{site}/app/out/a%20b.pdb?t=1") == (200, data)
+        assert await run("GET", f"{site}/app/none.pdb") == (404, None)
+        assert await run("GET", f"{site}/other/a.pdb") == "site"  # not this trial's project
+        assert await run("GET", f"{site}/app/%2e%2e/%2e%2e/secret") == (403, None)
 
     asyncio.run(scenario())
-    assert server.project_file("other/a.pdb") is None  # not this trial's project: the backend's
-    with pytest.raises(web.HTTPForbidden):
-        server.project_file("app/../../secret")
-
-
-def test_local_cookie():
-    h = 'access_token="Bearer x"; Domain=dev.example.org; HttpOnly; Path=/v3; Secure; SameSite=strict'
-    assert server.local_cookie(h) == 'access_token="Bearer x"; HttpOnly; Path=/v3; SameSite=strict'

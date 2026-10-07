@@ -7,6 +7,12 @@ from pathlib import Path
 OUT = Path(os.environ.get("REWARD_JSON", "/logs/verifier/reward.json"))
 _scores: dict[str, float] = {}
 _partial: dict[str, float] = {}
+_infra: list[str] = []
+
+
+class InfraError(Exception):
+    """The eval setup failed, not the agent (e.g. the viewer sidecar). The trial gets no reward.json,
+    so Harbor shows an error, not a 0."""
 
 
 def partial(value: float) -> float:
@@ -22,7 +28,16 @@ def pytest_runtest_logreport(report):
         _scores[name] = _partial.get(name, 1.0) if report.passed else 0.0
 
 
+def pytest_runtest_makereport(item, call):  # returns None: pytest still makes the report
+    if call.excinfo and call.excinfo.errisinstance(InfraError):
+        _infra.append(f"{item.name}: {call.excinfo.value}")
+
+
 def pytest_sessionfinish(session):
+    if _infra:
+        OUT.unlink(missing_ok=True)
+        print("\ninfra error, no reward:", *_infra, sep="\n  ")
+        return
     reward = sum(_scores.values()) / len(_scores) if _scores else 0.0
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps({"reward": reward, **_scores}))

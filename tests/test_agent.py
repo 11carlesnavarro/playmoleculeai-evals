@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import shlex
 import subprocess
 from pathlib import Path
@@ -7,7 +8,7 @@ from pathlib import Path
 import yaml
 
 from pmai_evals.agent import PmaiAgent
-from test_trial import make_db
+from test_trial import fake_viewer, make_db
 
 
 def run_script(tmp_path, **kwargs) -> str:
@@ -33,6 +34,27 @@ def test_script(tmp_path):
     assert "--config /logs/agent/home --model gpt-6-luna --output json" in s
     assert shlex.quote("it's a 'quoted' prompt") in s
     assert s.rstrip().endswith("> /logs/agent/events.jsonl")
+
+
+def test_viewer(tmp_path):
+    """VIEWER_URL (viewer tasks): /open, then --viewer-id. A 503 stops the script with the reason."""
+    lines = run_script(tmp_path, flags="--backend local").splitlines()
+    start = next(i for i, x in enumerate(lines) if x.startswith("FLAGS="))
+    block = "\n".join(["set -e", *lines[start : lines.index("fi", start) + 1], 'echo "$FLAGS"'])
+    project = tmp_path / "p1"
+    project.mkdir()
+
+    def run(**env):
+        env = {"PATH": os.environ["PATH"], **env}
+        return subprocess.run(["bash", "-c", block], env=env, cwd=project, text=True, capture_output=True)
+
+    assert run().stdout == "--backend local\n"  # not a viewer task
+    routes = {"/open?project=p1": (200, b"ready")}
+    with fake_viewer(routes) as url:
+        assert run(VIEWER_URL=url).stdout == "--backend local --viewer-id eval\n"
+        routes["/open?project=p1"] = (503, b"no WebGL2: Mol* cannot draw")
+        r = run(VIEWER_URL=url)
+    assert (r.returncode, r.stdout, r.stderr) == (1, "", "viewer /open: 503 no WebGL2: Mol* cannot draw\n")
 
 
 def test_no_model(tmp_path):
