@@ -52,7 +52,7 @@ playmoleculeai-evals/
 - `make image`, `make run` and `make view` work (run by the user as `slurmweb`, 2026-10-05). The first smoke trial got no reward:
   the `.env` OpenAI key is archived (401), and then `populate_context_post_run` crashed on the read only `agent.db`, which stopped the trial before the verifier. Both causes are known; the crash is fixed. Run the smoke job again with a working key.
 - Phase 3: done. `sa-models` and `skills-ab` ran in Docker (results in the phase 3 section). The image now has the skills (it had none before).
-- Phase 4: `scripts/eval_account.py`. The old harness account logs in on the dev backend, but it is a personal account (`carles`). A dedicated eval account needs the user's choice of email.
+- Phase 4: done. The eval account is `carles` (the user's account, `PM_EMAIL` in `.env`); `scripts/eval_account.py check` logs in on the dev backend.
 - The old harness is removed. All of it is in `/fast_shared/users/carles/data/playmoleculeAIdata/evals-archive-2026-10-05/`:
   - `repo-before-cleanup.tar.gz`: the repo before the cleanup (old src, tests, scripts, mining, development, docs, playwright). Not in it: `.env`, `playwright/.auth`, `.venv`, `.git`, bixbench fixtures.
   - `runs/`: the old run results (34 GB), the baseline for phase 2.
@@ -213,7 +213,7 @@ With 1 attempt on 10 tasks, a difference of about 0.1 is noise: the removed thir
 
 ---
 
-## Phase 4. Eval account (done, account choice open)
+## Phase 4. Eval account (done)
 
 Facts `[checked]` in pmbackend:
 - Login: `GET /v3/auth/csrf`, then `POST /v3/auth/login` (form `username`=email, `password`, header `X-CSRF-Token` = the `csrf_token` cookie).
@@ -224,7 +224,7 @@ Facts `[checked]` in pmbackend:
 - No captcha, no 2FA, no API key. The access JWT expires after `auth.jwt_expiration` minutes.
 - Job bucket name: `config["bucket"]`, default `{user_id}-jobs`.
 
-File: `scripts/eval_account.py` (`signup`, `verify CODE`, `check`). `PM_BACKEND` defaults to the dev backend.
+File: `scripts/eval_account.py` (`check`, `signup`, `verify CODE`). It reads `PM_BACKEND_URL` (default: the dev backend), `PM_EMAIL` and `PM_PASSWORD` from `.env`.
 
 Result (2026-10-06): `check` with the old harness account (`PM_EMAIL`, `PM_PASSWORD`) on `http://computer19:8002` logs in:
 
@@ -236,21 +236,13 @@ Result (2026-10-06): `check` with the old harness account (`PM_EMAIL`, `PM_PASSW
 | default project | `carles-project` |
 | priorities | normal, 2gpus, general, low |
 
-This is a personal account. Phase 6 jobs would go to its bucket (`carles-jobs` by default) and its credit. A dedicated account (for example `pmai-evals`) keeps them apart. It needs an email that can get the code, and that matches no group `email_patterns`:
-
-```bash
-# .env: PM_EVAL_EMAIL, PM_EVAL_PASSWORD
-set -a && . ./.env && set +a
-uv run python scripts/eval_account.py signup        # a code goes to PM_EVAL_EMAIL
-uv run python scripts/eval_account.py verify CODE
-uv run python scripts/eval_account.py check         # put user_id in PM_EVAL_USER_ID
-```
+Decision (2026-10-06, the user): the eval account is this account, `carles`. Phase 6 jobs go to its bucket (`carles-jobs` by default) and use its credit. For a dedicated account later: `signup`, then `verify CODE`, with that account in `PM_EMAIL` and `PM_PASSWORD`.
 
 Still to settle in phase 6:
 - If the dev backend enforces credits, an admin grants credit with `POST /v3/admin/groups/{id}/grants`.
 - The bucket folder on computer19 (`$PM_DATA_STORAGE/<bucket>`). It is not visible from ws12.
 
-**Done when:** `check` prints the user with a country. Done for the personal account.
+**Done when:** `check` prints the user with a country. Done.
 
 ---
 
@@ -350,7 +342,7 @@ from playwright.async_api import async_playwright
 
 import pmview
 
-BACKEND = os.environ["PM_BACKEND"]                       # http://computer19.acellera.lan:8002
+BACKEND = os.environ["PM_BACKEND_URL"]                   # http://computer19.acellera.lan:8002
 AGENT_WS = os.environ.get("AGENT_WS", "ws://main:8100/v1/ws/eval")
 STATIC = Path(os.environ.get("PMVIEW_STATIC", "/srv/pmview")).resolve()
 FILES = Path(os.environ.get("FILES_ROOT", "/files")).resolve()   # <project>/<path>, as in the backend bucket
@@ -372,7 +364,7 @@ def local_cookie(header: str) -> str:
 async def login(http: aiohttp.ClientSession) -> SimpleCookie:
     async with http.get(f"{BACKEND}/v3/auth/csrf") as r:
         csrf = (await r.json())["csrf_token"]
-    form = {"username": os.environ["PM_EVAL_EMAIL"], "password": os.environ["PM_EVAL_PASSWORD"]}
+    form = {"username": os.environ["PM_EMAIL"], "password": os.environ["PM_PASSWORD"]}
     async with http.post(f"{BACKEND}/v3/auth/login", data=form,
                          headers={"X-CSRF-Token": csrf, "Cookie": f"csrf_token={csrf}"}) as r:
         r.raise_for_status()
@@ -558,9 +550,9 @@ services:
   viewer:
     image: pmai-viewer:latest
     environment:
-      PM_BACKEND: ${PM_BACKEND}
-      PM_EVAL_EMAIL: ${PM_EVAL_EMAIL}
-      PM_EVAL_PASSWORD: ${PM_EVAL_PASSWORD}
+      PM_BACKEND_URL: ${PM_BACKEND_URL}
+      PM_EMAIL: ${PM_EMAIL}
+      PM_PASSWORD: ${PM_PASSWORD}
       PRELOAD_PDB: "@PDB@"
       PRELOAD_FILES: "@FILES@"
     volumes: ["project:/files/app"]
@@ -675,7 +667,7 @@ agents:
     kwargs:
       pmai_config: /opt/pmai-config/pm
       work: /data/pm/1234-jobs/eval-$HOSTNAME     # one project per trial
-      flags: --serve --wait-jobs --user 1234
+      flags: --serve --wait-jobs --user carles
     env:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       BACKEND_SERVICE_TOKEN: ${BACKEND_SERVICE_TOKEN}

@@ -70,7 +70,7 @@ cp -r {o.pmai_config}/. {HOME}/
 echo {o.work} > /logs/agent/work_dir
 cd {o.work}
 FLAGS="{o.flags}"
-if {OPEN_VIEWER}; then FLAGS="$FLAGS --serve --viewer-id eval"; fi
+if {OPEN_VIEWER}; then FLAGS="$FLAGS --viewer-id eval"; fi
 pmai run $FLAGS --config {HOME} {model_flag} --output json \\
   --prompt {shlex.quote(instruction)} > /logs/agent/events.jsonl
 """,

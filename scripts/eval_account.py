@@ -1,9 +1,9 @@
-"""The eval account on the dev backend: create it once, then check the login.
+"""The eval account on the dev backend: check the login (or create a new account once).
 
 set -a && . ./.env && set +a
-uv run python scripts/eval_account.py signup        # a code goes to PM_EVAL_EMAIL
+uv run python scripts/eval_account.py check         # user info and default project
+uv run python scripts/eval_account.py signup        # a code goes to PM_EMAIL
 uv run python scripts/eval_account.py verify CODE
-uv run python scripts/eval_account.py check         # put the user id in PM_EVAL_USER_ID
 """
 
 import json
@@ -12,8 +12,8 @@ import sys
 
 import httpx
 
-B = os.environ.get("PM_BACKEND", "http://computer19.acellera.lan:8002") + "/v3"
-EMAIL, PASSWORD = os.environ["PM_EVAL_EMAIL"], os.environ["PM_EVAL_PASSWORD"]
+B = os.environ.get("PM_BACKEND_URL", "http://computer19.acellera.lan:8002") + "/v3"
+EMAIL, PASSWORD = os.environ["PM_EMAIL"], os.environ["PM_PASSWORD"]
 
 
 def login(c: httpx.Client) -> dict[str, str]:
