@@ -27,4 +27,4 @@ test:
 	uv run pytest -q
 
 lint:
-	uv run ruff check src tests tasks scripts
+	uv run ruff check src tests tasks scripts viewer

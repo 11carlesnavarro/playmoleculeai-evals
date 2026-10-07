@@ -9,7 +9,7 @@ The plan page shows the idea. This file is the work list. Do the phases in order
 | 2 | Four acellera-bench sets run with their old checks, unchanged | none |
 | 3 | Models, configs and skills compared in one job | none |
 | 4 | Eval account on the dev backend | one account (one time) |
-| 5 | Viewer tasks: PMView sidecar, molecular-visualization ported | PMAI: `--serve`, `--viewer-id` |
+| 5 | Viewer tasks: PMView sidecar, molecular-visualization ported | PMAI: `--viewer-id`, `--serve` (done) |
 | 6 | PlayMolecule job tasks | PMAI: `--user`, `--wait-jobs` |
 | 7 | Scale out, nightly run | none |
 
@@ -24,8 +24,7 @@ playmoleculeai-evals/
 ├── image/Dockerfile              pmai-eval: sandbox + pmai + grader
 ├── viewer/                       phase 5
 │   ├── Dockerfile                pmai-viewer: pinned PMView build + Chromium + server
-│   ├── server.py                 one origin for PMView: static, /v3 proxy, agent socket, files, control API
-│   └── pmview.py                 page helpers, from the old src/pmai_evals/browser/ (archive)
+│   └── server.py                 one origin for PMView (build, agent socket, files, /v3 proxy) + control API
 ├── config/<name>/agent_config.yaml   pmai configs, baked at /opt/pmai-config
 ├── src/pmai_evals/
 │   ├── agent.py                  Harbor agent (host side)
@@ -39,13 +38,13 @@ playmoleculeai-evals/
 ├── scripts/legacy_test_case.py   test file copied into every ported task
 ├── scripts/compare_old.py        a job against the old runs in the archive
 ├── scripts/eval_account.py       phase 4
-├── tests/                        unit tests for src/ and viewer/
+├── tests/                        unit tests for src/ and viewer/ (fake PMView socket, no browser)
 └── eval_sets/                    deleted set by set, after each port is verified
 ```
 
 ---
 
-## Status (2026-10-06)
+## Status (2026-10-07)
 
 - Phases 0 and 1 are done. The files are the reference. The two sections below give only the changes from the first plan and the checks.
 - Phase 2: 40 tasks ported, and the port gives the old scores on 480 old trials. In Docker, `acellera-sample` (one case per set, gpt-6-luna) gave reward 1.0 on 4 of 4 trials, for less than $0.01.
@@ -53,6 +52,7 @@ playmoleculeai-evals/
   the `.env` OpenAI key is archived (401), and then `populate_context_post_run` crashed on the read only `agent.db`, which stopped the trial before the verifier. Both causes are known; the crash is fixed. Run the smoke job again with a working key.
 - Phase 3: done. `sa-models` and `skills-ab` ran in Docker (results in the phase 3 section). The image now has the skills (it had none before).
 - Phase 4: done. The eval account is `carles` (the user's account, `PM_EMAIL` in `.env`); `scripts/eval_account.py check` logs in on the dev backend.
+- Phase 5: `pmai run --viewer-id` is in playmoleculeAI. `viewer/server.py` and its unit tests are done (2026-10-07). Next: the image (`viewer/Dockerfile`).
 - The old harness is removed. All of it is in `/fast_shared/users/carles/data/playmoleculeAIdata/evals-archive-2026-10-05/`:
   - `repo-before-cleanup.tar.gz`: the repo before the cleanup (old src, tests, scripts, mining, development, docs, playwright). Not in it: `.env`, `playwright/.auth`, `.venv`, `.git`, bixbench fixtures.
   - `runs/`: the old run results (34 GB), the baseline for phase 2.
@@ -248,298 +248,97 @@ Still to settle in phase 6:
 
 ## Phase 5. Viewer sidecar
 
+Plan page with diagrams: https://claude.ai/artifact/RUsrHQRhikRFa3q8DMA7gb
+
 ### How it works
 
-PMView sends every call to its own origin: `location.origin + /v3/...` `[checked]`. There is no setting for the backend URL or the agent URL. So the sidecar is that origin:
+Each viewer task gets a second container, `viewer`. It runs the real PMView build in headless Chromium. The design needs no PMView source: only the built files from the `pmweb` image, and the agent's own viewer API.
+
+PMView sends every call to its own origin (`location.origin + /v3/...`) `[checked]`, so `viewer/server.py` is that origin:
 
 | Path from PMView | Goes to |
 |---|---|
-| `/` and assets | the pinned PMView build (from the `pmweb` image) |
-| `/v3/agent/ws/<any id>` | `ws://main:8100/v1/ws/eval` (our `pmai run --serve --viewer-id eval`) |
-| `/v3/file/<project>/<path>` GET, PUT | the shared project folder; GET falls back to the backend |
-| every other `/v3/...` | the dev backend, with the eval account cookies |
+| `/` and assets | the PMView build (`/srv/pmview`) |
+| `/v3/agent/ws/<any id>` | the sidecar. It keeps this socket for the whole trial. |
+| `/v3/file/<project>/<path>` GET, PUT | the trial's project folder (`/files/<project>`, a shared volume) |
+| every other `/v3/...` | the dev backend, with the browser's cookies (the eval account) |
 
-The agent socket protocol `[checked]`: agent sends `{"type": "pmview_command", "tool_name", "arguments", "chat_id", "command_id"}`, PMView replies `{"type": "pmview_result", "command_id", "output" | "error"}`. There is no hello message: the id in the path is the viewer id. pmai waits 30 s for a socket, then fails the command.
+One trial:
 
-### 5.1 PMAI: `--serve` and `--viewer-id` (playmoleculeAI `src/playmoleculeai/cli.py`)
+1. The sidecar starts Chromium with WebGL on the CPU (SwiftShader), checks WebGL2, and logs in through its own proxy, so the browser keeps the cookies.
+2. The agent script calls `GET viewer:9000/open?project=app`. The sidecar opens PMView on the project and waits until PMView runs `print('ready')` through `pmview_run_python`: the socket is up and Pyodide has started. Else 503 with the reason.
+3. On 200 the script adds `--viewer-id eval`. The sidecar connects to `ws://main:8100/v1/ws/eval` while pmai serves it and passes pmai's messages to PMView. Each result goes back to the one that sent the command.
+4. After pmai exits, the sidecar keeps the PMView socket (a ping every 25 s). The tests call `POST viewer:9000/python` and read the viewer with `pmv.get_viewer_state()`: the API that the agent uses. If PMView breaks this API, the agent breaks too, and the eval must find it.
+5. On `docker compose down`, the sidecar saves `final.png` next to `events.jsonl` in the artifacts folder.
 
-Today `pmai run` sets `viewer_id=None` and only enters the lifespan, so `/v1/ws/{id}` is not served `[checked]`.
+PMView facts `[checked]` (pmview origin/main cab37c5):
+- Socket messages: `pmview_command` `{tool_name, arguments, chat_id, command_id}` gets `pmview_result` `{command_id, output | error}`; `ping` gets `pong`. There is no hello message.
+- PMView drops a socket with no message for 31 s and connects again, forever (1 s to 30 s). Close codes 1006, 1008, 4001, 4003, 4401, 4403 start an auth check.
+- PMView sends a result on the socket that it has when the tool ends. Thus a result can come on a new socket.
+- `pmview_run_python` returns `{stdout, stderr, result}`, with no size limit. Before Pyodide is ready, it returns at once with `stderr` "still starting". It does not need the Console tab.
+- `pmview_screenshot` returns `{success, fileContent}`, where `fileContent` is a data URI.
+- PMView puts the project in front of each file path: `/v3/file/<project>/<path>`. `pmview_save` sends `PUT` with a form field `file`.
+- The project comes from the `PM_PROJECT` cookie, else from `GET /v3/default-project`.
+- jQuery, Pyodide 0.29.3 and other scripts come from CDNs, so the sidecar needs internet.
+- pmbackend sets all cookies with `SameSite=strict`. `Domain` and `Secure` depend on its config, so the proxy removes both.
 
-```python
-@asynccontextmanager
-async def serving(app, port: int):
-    """Serve the API while the turn runs (sandbox proxy, viewer socket). Also runs the lifespan."""
-    server = uvicorn.Server(uvicorn.Config(app, host="0.0.0.0", port=port, log_level="warning"))
-    task = asyncio.create_task(server.serve())
-    while not server.started:
-        if task.done():
-            task.result()  # raises the startup error
-        await asyncio.sleep(0.05)
-    try:
-        yield
-    finally:
-        server.should_exit = True
-        await task
-```
+Failures are infra errors, not a score of 0:
 
-```diff
-     client = ClientContext(
--        viewer_id=None,
-+        viewer_id=args.viewer_id,
-         user_ip="",
-         user_bucket=user_bucket,
-         project=project,
--        user_id=getpass.getuser(),
-+        user_id=args.user or getpass.getuser(),
-     )
--    async with app.router.lifespan_context(app):
-+    async with serving(app, config.port) if args.serve else app.router.lifespan_context(app):
-```
+| Risk | Guard |
+|---|---|
+| No WebGL2: Mol* draws a flat image and shows no error | WebGL2 gate at start: read the renderer name |
+| PMView not ready (Pyodide, CDNs) | `/open` waits for the socket and a Python probe, at most `READY_TIMEOUT` (300 s). Else 503 with the last reason and the last failed request. |
+| Page crash, browser gone | Playwright events set `broken`. Then `/open`, `/python` and `/screenshot` give 503. |
+| No message on the socket for 31 s | the sidecar pings every 25 s |
+| Refused handshake (1006) starts PMView's auth loop | the sidecar always accepts the socket |
+| PMView not connected when pmai sends a command | after 30 s, an error result goes to pmai: "The viewer is not connected." |
 
-```python
-run_parser.add_argument("--serve", action="store_true",
-                        help="Serve the API on the config port during the turn.")
-run_parser.add_argument("--viewer-id", help="Viewer session for pmview tools. Needs --serve.")
-run_parser.add_argument("--user", help="PlayMolecule user id for backend calls. Default: OS user.")
-```
+No Playwright trace: a trace records the login form (with the password) and the auth cookies `[checked]`.
 
-Test in PMAI: `pmai run --serve` answers `GET /v1/...` during the turn, and the port is free after it.
+### 5.1 PMAI: `--viewer-id` (done)
 
-### 5.2 `viewer/pmview.py`
+In playmoleculeAI `cli.py` (d5a3f3fb, pushed by the user). `pmai run --viewer-id ID` serves the API during the turn (on `AGENT_PORT`, else the YAML port) and sends viewer commands to the viewer that connects at `/v1/ws/ID`. The chat records the viewer id, as for a browser chat. `--serve` serves the API with no viewer (phase 6).
 
-Take `src/pmai_evals/browser/{observers.py,viewer_loader.py,locators.py}` and `_io.py` from the archive (`tar -xzf repo-before-cleanup.tar.gz ./src/pmai_evals/browser ./src/pmai_evals/_io.py`) and put them into this one file. Inline `parse_json_lenient` and `BrowserError`. Keep:
+### 5.2 `viewer/server.py` and `tests/test_viewer_server.py` (done)
 
-```python
-READY = "window.pyodideWorkerReady && window.molstar"
-def parse_json_lenient(text): ...  # from _io.py
-VIEWER_STATE_JSON = ...       # from observers.py
-VIEWER_SELECTION_JSON = ...   # from observers.py
-SCREENSHOT_DATA_URI = ...     # from observers.py
-async def wait_for_system(page, identifier, timeout_s=60): ...   # was _wait_for_identifier
-async def export_viewer_state(page, dest_dir) -> Path: ...       # returns the zip path
-```
+The files are the reference. Environment: `PM_BACKEND_URL`, `PM_EMAIL`, `PM_PASSWORD`, `AGENT_WS` (default `ws://main:8100/v1/ws/eval`), `PMVIEW_STATIC`, `FILES_ROOT`, `EVIDENCE_DIR`, `READY_TIMEOUT`.
 
-### 5.3 `viewer/server.py`
+Control API on `:9000`:
 
-```python
-"""Viewer sidecar: one origin for PMView, and a control API for the agent and the verifier.
+| Call | Result |
+|---|---|
+| `GET /healthz` | 200 when the browser has started, or failed to start. Compose then starts `main`. |
+| `GET /open?project=P` | 200 `ready`, or 503 with the reason |
+| `POST /python` (body: code) | `{stdout, stderr, result}`. 503: infra error. 502: PMView gave an error. |
+| `GET /screenshot` | PNG |
 
-:8080  PMView origin: static build, /v3 proxy, agent socket, project files
-:9000  control: /healthz /open /state /selection /shot /export
-"""
+Checked:
 
-import asyncio
-import base64
-import os
-import re
-import tempfile
-from http.cookies import SimpleCookie
-from pathlib import Path
+| Check | Result |
+|---|---|
+| Unit tests: fake PMView socket and fake pmai (ping, each result to its sender, a test command after pmai exits, 503 without PMView, project files, cookies) | 5 passed in 0.6 s |
+| Browser part on ws12: Playwright 1.58.0, its Chromium, the dev backend | renderer "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)...))"; the browser has `access_token`, `csrf_token`, `refresh_token`; `user-info` through the proxy: 200 |
 
-import aiohttp
-from aiohttp import web
-from playwright.async_api import async_playwright
+Not checked yet (needs the image): the PMView build path in the `pmweb` image, Mol* speed with SwiftShader, `/open` on a real PMView.
 
-import pmview
-
-BACKEND = os.environ["PM_BACKEND_URL"]                   # http://computer19.acellera.lan:8002
-AGENT_WS = os.environ.get("AGENT_WS", "ws://main:8100/v1/ws/eval")
-STATIC = Path(os.environ.get("PMVIEW_STATIC", "/srv/pmview")).resolve()
-FILES = Path(os.environ.get("FILES_ROOT", "/files")).resolve()   # <project>/<path>, as in the backend bucket
-ORIGIN = "http://localhost:8080"
-COOKIE_PATHS = {"access_token": "/v3", "refresh_token": "/v3/auth/refresh-token", "csrf_token": "/"}
-HOP = {"host", "origin", "referer", "content-length", "transfer-encoding", "connection", "content-encoding"}
-
-
-def safe_path(root: Path, rel: str) -> Path | None:
-    p = (root / rel).resolve()
-    return p if p.is_relative_to(root) else None
-
-
-def local_cookie(header: str) -> str:
-    """Backend cookies carry the dev Domain and Secure: drop both so they stay on our origin."""
-    return re.sub(r";\s*(Domain=[^;]*|Secure)(?=;|$)", "", header, flags=re.I)
-
-
-async def login(http: aiohttp.ClientSession) -> SimpleCookie:
-    async with http.get(f"{BACKEND}/v3/auth/csrf") as r:
-        csrf = (await r.json())["csrf_token"]
-    form = {"username": os.environ["PM_EMAIL"], "password": os.environ["PM_PASSWORD"]}
-    async with http.post(f"{BACKEND}/v3/auth/login", data=form,
-                         headers={"X-CSRF-Token": csrf, "Cookie": f"csrf_token={csrf}"}) as r:
-        r.raise_for_status()
-        return r.cookies
-
-
-# ---- :8080, the PMView origin -------------------------------------------------
-
-async def proxy(request: web.Request) -> web.StreamResponse:
-    headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP}
-    async with request.app["http"].request(request.method, BACKEND + request.rel_url.path_qs,
-                                           headers=headers, data=await request.read(),
-                                           allow_redirects=False) as r:
-        resp = web.StreamResponse(status=r.status)
-        for k, v in r.headers.items():
-            if k.lower() not in HOP:
-                resp.headers.add(k, local_cookie(v) if k.lower() == "set-cookie" else v)
-        await resp.prepare(request)
-        async for chunk in r.content.iter_any():  # SSE too
-            await resp.write(chunk)
-        return resp
-
-
-async def file_get(request: web.Request) -> web.StreamResponse:
-    p = safe_path(FILES, request.match_info["path"])
-    return web.FileResponse(p) if p and p.is_file() else await proxy(request)
-
-
-async def file_put(request: web.Request) -> web.Response:  # pmview_save
-    p = safe_path(FILES, request.match_info["path"])
-    if p is None:
-        raise web.HTTPForbidden()
-    form = await request.post()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_bytes(form["file"].file.read())
-    return web.json_response({})  # [verify] the shape sendToBackend.ts expects
-
-
-async def agent_ws(request: web.Request) -> web.WebSocketResponse:
-    """PMView's agent socket goes to our pmai, whatever session id PMView picked."""
-    browser = web.WebSocketResponse()
-    await browser.prepare(request)
-    while True:  # pmai serves only during `pmai run`: keep PMView connected and retry
-        try:
-            agent = await request.app["http"].ws_connect(AGENT_WS)
-            break
-        except aiohttp.ClientError:
-            if browser.closed:
-                return browser
-            await browser.send_str('{"type":"ping"}')  # PMView reconnects after 31 s of silence
-            await asyncio.sleep(1)
-
-    async def pump(src, dst):
-        async for msg in src:
-            if msg.type == aiohttp.WSMsgType.TEXT:
-                await dst.send_str(msg.data)
-            elif msg.type == aiohttp.WSMsgType.BINARY:
-                await dst.send_bytes(msg.data)
-
-    await asyncio.wait([asyncio.create_task(pump(browser, agent)), asyncio.create_task(pump(agent, browser))],
-                       return_when=asyncio.FIRST_COMPLETED)
-    await agent.close()
-    await browser.close()
-    return browser
-
-
-async def spa(request: web.Request) -> web.FileResponse:
-    p = safe_path(STATIC, request.match_info["path"])
-    return web.FileResponse(p if p and p.is_file() else STATIC / "index.html")
-
-
-# ---- :9000, control ---------------------------------------------------------
-
-async def open_project(request: web.Request) -> web.Response:
-    """Called by the agent before `pmai run`: load PMView on the project, preload structures."""
-    ctx, page = request.app["ctx"], request.app["page"]
-    await ctx.add_cookies([{"name": "PM_PROJECT", "value": request.query["project"],
-                            "domain": "localhost", "path": "/"}])
-    await page.goto(ORIGIN)
-    await page.wait_for_function(pmview.READY, timeout=300_000)
-    for pdb in os.environ.get("PRELOAD_PDB", "").split():
-        await page.evaluate("id => window.handleLoadPDB(id)", pdb)
-        await pmview.wait_for_system(page, pdb)
-    for f in os.environ.get("PRELOAD_FILES", "").split():
-        await page.evaluate("f => window.dispatchTool({tool_name: 'pmview_load', arguments: {files: [f]}})", f)
-        await pmview.wait_for_system(page, Path(f).stem)
-    return web.Response(text="ok")
-
-
-async def healthz(request: web.Request) -> web.Response:
-    return web.Response(text="ok")
-
-
-async def state(request: web.Request) -> web.Response:  # the Python side returns loose JSON
-    return web.json_response(pmview.parse_json_lenient(await request.app["page"].evaluate(pmview.VIEWER_STATE_JSON)))
-
-
-async def selection(request: web.Request) -> web.Response:
-    return web.json_response(pmview.parse_json_lenient(await request.app["page"].evaluate(pmview.VIEWER_SELECTION_JSON)))
-
-
-async def shot(request: web.Request) -> web.Response:
-    uri = await request.app["page"].evaluate(pmview.SCREENSHOT_DATA_URI)
-    return web.Response(body=base64.b64decode(uri.split(",", 1)[1]), content_type="image/png")
-
-
-async def export(request: web.Request) -> web.FileResponse:
-    return web.FileResponse(await pmview.export_viewer_state(request.app["page"], Path(tempfile.mkdtemp())))
-
-
-async def start_browser(app: web.Application) -> None:
-    app["http"] = aiohttp.ClientSession(cookie_jar=aiohttp.DummyCookieJar())
-    cookies = await login(app["http"])
-    pw = await async_playwright().start()
-    browser = await pw.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
-    app["ctx"] = await browser.new_context(viewport={"width": 1280, "height": 800})
-    await app["ctx"].add_cookies([{"name": k, "value": cookies[k].coded_value, "domain": "localhost", "path": p}
-                                  for k, p in COOKIE_PATHS.items()])
-    app["page"] = await app["ctx"].new_page()
-
-
-async def main() -> None:
-    origin = web.Application()
-    origin.add_routes([
-        web.get("/v3/agent/ws/{id}", agent_ws),
-        web.get("/v3/file/{path:.*}", file_get),
-        web.put("/v3/file/{path:.*}", file_put),
-        web.route("*", "/v3/{path:.*}", proxy),
-        web.get("/{path:.*}", spa),
-    ])
-    control = web.Application()
-    control.add_routes([
-        web.get("/healthz", healthz),
-        web.get("/open", open_project), web.get("/state", state), web.get("/selection", selection),
-        web.get("/shot", shot), web.get("/export", export),
-    ])
-    await start_browser(origin)
-    for key in ("http", "ctx", "page"):
-        control[key] = origin[key]
-    for app, port in ((origin, 8080), (control, 9000)):
-        runner = web.AppRunner(app)
-        await runner.setup()
-        await web.TCPSite(runner, "0.0.0.0", port).start()
-    await asyncio.Event().wait()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-`[verify]` items in this file:
-- `pmview_run_python` needs `window.term` (the Console tab). If it is missing after `/open`, click the Console tab once.
-- The access JWT lives `auth.jwt_expiration` minutes. PMView refreshes on 401 through the proxy, and `local_cookie` keeps the new cookie on our origin.
-- `PM_PROJECT` decides the project; without it PMView asks `GET /v3/default-project` `[checked]`.
-
-### 5.4 `viewer/Dockerfile`
+### 5.3 `viewer/Dockerfile` and `make viewer` (next)
 
 ```dockerfile
 # The PMView version under test: pin this digest for release runs.
 FROM europe-southwest1-docker.pkg.dev/repositories-368911/acellera-docker-apps/pmweb:latest AS pmweb
 
 FROM mcr.microsoft.com/playwright/python:v1.58.0-noble
-RUN pip install --no-cache-dir "aiohttp>=3.10"
+RUN pip install --no-cache-dir "aiohttp>=3.10" "playwright==1.58.0"
+# [verify] the build path in pmweb
 COPY --from=pmweb /usr/share/nginx/html /srv/pmview
-COPY viewer/ /srv/viewer/
-WORKDIR /srv/viewer
+COPY viewer/server.py /srv/viewer/
 EXPOSE 8080 9000
-CMD ["python", "server.py"]
+CMD ["python", "/srv/viewer/server.py"]
 ```
 
-PMView loads jQuery, jquery.terminal, Pyodide 0.29.3, prismjs and fonts from CDNs at run time `[checked]`, so the sidecar needs internet.
+### 5.4 Compose file for viewer tasks
 
-### 5.5 `scripts/viewer_compose.yaml`
-
-Harbor runs `docker compose` with the process env, so `${VAR}` works here `[checked]`. The named volume is filled from the image's `/app` on first use.
+Harbor runs `docker compose` with the process env, so `${VAR}` works here `[checked]`. It also sets `HOST_ARTIFACTS_PATH` from its own `/logs/artifacts` mount `[checked]`. The named volume is filled from the image's `/app` on first use.
 
 ```yaml
 services:
@@ -553,9 +352,9 @@ services:
       PM_BACKEND_URL: ${PM_BACKEND_URL}
       PM_EMAIL: ${PM_EMAIL}
       PM_PASSWORD: ${PM_PASSWORD}
-      PRELOAD_PDB: "@PDB@"
-      PRELOAD_FILES: "@FILES@"
-    volumes: ["project:/files/app"]
+    volumes:
+      - project:/files/app
+      - ${HOST_ARTIFACTS_PATH}:/logs/artifacts
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/healthz')"]
       interval: 5s
@@ -564,7 +363,41 @@ volumes:
   project:
 ```
 
-### 5.6 Try the sidecar without Harbor
+### 5.5 `src/pmai_evals/agent.py`: stop on 503
+
+Today, when `/open` fails for any reason, the script runs pmai without the viewer. Change: no sidecar (connection refused) gives no viewer flags, as now; a sidecar that answers 503 stops the script with a non-zero exit and the reason. That is an infra error.
+
+### 5.6 `src/pmai_evals/trial.py`: the viewer through the agent's API
+
+Replace `viewer_get("/state")` and `viewer_get("/selection")`. A 503 from the sidecar raises an infra error, not a failed assert.
+
+| Old check reads | New, in `trial.py` | Through |
+|---|---|---|
+| `artifact.viewer_state()` | `viewer_state()` | `pmv.get_viewer_state()` |
+| `artifact.viewer_selection()` | `viewer_selection()` | `pmv.get_viewer_selection()`. Before the first selection it raises `TypeError`: return `{}`. |
+| `artifact.load_system(name)` | `viewer_system(uuid)` | `pmv.get_system(uuid)`, written as PDB text |
+| final screenshot | `viewer_screenshot()` | `GET /screenshot` |
+
+### 5.7 Port molecular-visualization
+
+The old checks read other field names. An adapter in `legacy.py` maps them:
+
+| Old field | New field |
+|---|---|
+| `moleculeID` | the key of `systems` |
+| `type` | `style` |
+| `selection` | `sel` |
+| `color_value` (int) | `color` (`"#rrggbb"`) |
+| top level nodes | leaf systems |
+
+```bash
+uv run python scripts/cases_to_tasks.py eval_sets/acellera-bench/molecular-visualization tasks/molecular-visualization
+make viewer && make run JOB=experiments/viewer.yaml
+```
+
+`experiments/viewer.yaml`: 3 tasks, gpt-6-luna, 1 attempt, less than $0.05. The full set only after that sample passes.
+
+### 5.8 Try the sidecar without Harbor
 
 ```bash
 make viewer
@@ -572,39 +405,9 @@ docker run --rm -p 8080:8080 -p 9000:9000 --env-file .env \
   -e AGENT_WS=ws://host.docker.internal:8100/v1/ws/eval --add-host host.docker.internal:host-gateway \
   -v /tmp/t1:/files pmai-viewer:latest
 curl "localhost:9000/open?project=app"
-cd /tmp/t1/app && pmai run --serve --viewer-id eval --config /tmp/t1/home --prompt "Load PDB 1CRN in the viewer"
-curl localhost:9000/state; curl -o shot.png localhost:9000/shot
-```
-
-### 5.7 Port molecular-visualization
-
-```bash
-uv run python scripts/cases_to_tasks.py eval_sets/acellera-bench/molecular-visualization tasks/molecular-visualization
-make viewer && make run JOB=experiments/viewer.yaml
-```
-
-`experiments/viewer.yaml` is `acellera-noviewer.yaml` with `tasks/molecular-visualization`. Run the four phase 2 sets again with the viewer: add the compose file to them (`scripts/viewer_compose.yaml` with empty preloads).
-
-### 5.8 Unit tests: `tests/test_viewer_server.py`
-
-Add `aiohttp` to the `dev` extra: this test imports `viewer/server.py`.
-
-```python
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parents[1] / "viewer"))
-from server import local_cookie, safe_path  # noqa: E402
-
-
-def test_safe_path(tmp_path):
-    assert safe_path(tmp_path, "app/a.pdb") == tmp_path / "app/a.pdb"
-    assert safe_path(tmp_path, "../etc/passwd") is None
-
-
-def test_local_cookie():
-    h = 'access_token="Bearer x"; Domain=dev.acellera.playmolecule.ai; HttpOnly; Path=/v3; Secure; SameSite=strict'
-    assert local_cookie(h) == 'access_token="Bearer x"; HttpOnly; Path=/v3; SameSite=strict'
+cd /tmp/t1/app && pmai run --viewer-id eval --config /tmp/t1/home --prompt "Load PDB 1CRN in the viewer"
+curl --data "import json; print(json.dumps(pmv.get_viewer_state()))" localhost:9000/python
+curl -o shot.png localhost:9000/screenshot
 ```
 
 **Done when:** molecular-visualization passes on Harbor at the old harness rate, and nobody opens a browser.

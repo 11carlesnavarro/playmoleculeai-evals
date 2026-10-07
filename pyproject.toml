@@ -12,6 +12,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "aiohttp>=3.10",  # viewer/server.py runs in the viewer image; the host needs it for tests only
     "anthropic>=0.39",  # judge.py runs in the image; the host needs it for tests only
     "pytest>=8.3",
     "ruff>=0.6",
@@ -27,7 +28,7 @@ packages = ["src/pmai_evals"]
 [tool.ruff]
 line-length = 110
 target-version = "py312"
-src = ["src", "tests"]
+src = ["src", "tests", "viewer"]
 extend-exclude = ["tasks/*/*/tests/checks.py"]  # old eval_sets code, copied unchanged by the port
 
 [tool.ruff.lint]
@@ -35,3 +36,4 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["viewer"]  # tests/test_viewer_server.py imports server
