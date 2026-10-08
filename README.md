@@ -10,43 +10,61 @@ harbor run ──► trial container (pmai-eval image)
                  └─ /tests/test.sh ──► pytest ──► /logs/verifier/reward.json
 ```
 
+## Where things are
+
+```text
+evals/                        WHAT we test: one folder per eval
+├── viewer-quality/           the final PMView image, rated by hand (20 cases)
+├── acellera-bench/           40 cases from the old harness, graded by code
+└── smoke/                    one case: does a run work at all
+    each eval has:
+    ├── README.md             what it measures, how to run it, its status
+    ├── cases/<case>/         one case (a Harbor task, see "A case" below)
+    └── *.yaml                job files: which cases, agent, model, attempts
+results/                      WHAT came out: one folder per run (not in git)
+docker/                       WHAT runs in the containers
+├── eval/Dockerfile           pmai-eval: sandbox + pmai (/opt/pmai) + grader (/opt/grader) + skills
+├── viewer/                   pmai-viewer: the PMView site in headless Chromium, next to the trial
+│                             (server.py, Dockerfile, compose.yaml: each viewer case has a copy)
+└── configs/<name>/           pmai agent configs, baked at /opt/pmai-config
+src/pmai_evals/               the Python code
+├── agent.py                  the Harbor agent: runs pmai in the trial (host side)
+├── trial.py                  what a test asks about a trial: answer, tool calls, cost, viewer
+├── reward.py                 pytest plugin: one score per test, reward = mean
+├── judge.py                  LLM judge for what code cannot check
+├── trajectory.py             the trace in make view
+└── legacy.py                 the old checks.py functions (acellera-bench)
+scripts/                      watch.py (make watch), eval_account.py (the eval account)
+tests/                        unit tests (make test)
+docs/implementation-plan.md   the work list and the status
+```
+
 ## Run
 
 ```bash
 cp .env.example .env              # add the keys
 make image                        # pmai-eval:latest (needs Docker and ../playmoleculeAI)
-make viewer                       # pmai-viewer:latest, for viewer tasks only (opens the PMView site)
-make run JOB=experiments/smoke.yaml
-make watch                        # in a second shell: each call, message and viewer image as it happens
-make view                         # results in jobs/<job file>-<date>/
-uv run python scripts/compare_old.py jobs/<job>   # old harness vs new, per case
+make viewer                       # pmai-viewer:latest, for viewer cases only
+make run JOB=evals/viewer-quality/train.yaml
+make run JOB=evals/viewer-quality/train.yaml CASE=vq-pocket-1hsg     # one case only
+make watch                        # in a second shell: each call, message and new viewer image
+make view                         # browse the results
 ```
 
-## Layout
+A run writes `results/<eval>-<job file>-<date>/`, with one folder for each trial (`<case>__<id>/`):
 
 ```text
-image/Dockerfile                  sandbox image + pmai (/opt/pmai) + grader (/opt/grader) + skills
-viewer/                           viewer tasks: the PMView site in headless Chromium, next to the trial container
-                                  (Dockerfile, server.py, compose.yaml: each viewer task has a copy)
-config/<name>/agent_config.yaml   pmai configs, baked at /opt/pmai-config
-src/pmai_evals/agent.py           the Harbor agent (host side)
-src/pmai_evals/trial.py           what a test asks about a trial: answer, tool calls, cost, viewer
-src/pmai_evals/reward.py          pytest plugin: one score per test, reward = mean
-src/pmai_evals/judge.py           LLM judge for what code cannot check
-src/pmai_evals/legacy.py          runs the old eval_sets checks.py functions unchanged
-tasks/<set>/<case>/               the cases: instruction.md, task.toml, environment/, tests/
-experiments/*.yaml                Harbor job files: datasets x agents (config, skills) x models
-scripts/cases_to_tasks.py         one time port: eval_sets/<set> -> tasks/<set>
-scripts/compare_old.py            a job against the old harness runs (archive)
-scripts/eval_account.py           the eval account on the dev backend: signup, verify, check
-eval_sets/                        the old case format; removed set by set after its port is compared
-docs/implementation-plan.md       the work list, phase by phase
+agent/events.jsonl                pmai's output as it runs (make watch reads it)
+agent/trajectory.json, images/    the trace in make view (written after the turn)
+artifacts/logs/artifacts/viewer/  viewer cases: final-view.png, steps/NNN.jpg, events.jsonl
+verifier/                         reward.json and the test output
+result.json                       reward, cost, error (written at the end)
 ```
 
 ## A case
 
 ```text
-tasks/smoke/hello-file/
+evals/smoke/cases/hello-file/
 ├── instruction.md        the user prompt
 ├── task.toml             image, timeouts, network
 ├── environment/          input files (Dockerfile FROM pmai-eval:latest + COPY), else .gitkeep
@@ -73,13 +91,13 @@ def test_answer_is_clear():
 `trial.py` reads `$TRIAL_LOGS` (default `/logs/agent`), so a test can run against a local `pmai run`:
 
 ```bash
-mkdir -p /tmp/t/logs/home /tmp/t/app && cp config/default/agent_config.yaml /tmp/t/logs/home/
+mkdir -p /tmp/t/logs/home /tmp/t/app && cp docker/configs/default/agent_config.yaml /tmp/t/logs/home/
 echo /tmp/t/app > /tmp/t/logs/work_dir
 # PMAI_HOME: a source checkout of pmai else takes it from playmoleculeAI/.env
 (cd /tmp/t/app && PMAI_HOME=/tmp/t/logs/home pmai run --config /tmp/t/logs/home --model gpt-6-luna \
-  --output json --prompt "$(cat tasks/smoke/hello-file/instruction.md)" > /tmp/t/logs/events.jsonl)
+  --output json --prompt "$(cat evals/smoke/cases/hello-file/instruction.md)" > /tmp/t/logs/events.jsonl)
 TRIAL_LOGS=/tmp/t/logs REWARD_JSON=/tmp/t/reward.json \
-  uv run pytest tasks/smoke/hello-file/tests -q -p pmai_evals.reward && cat /tmp/t/reward.json
+  uv run pytest evals/smoke/cases/hello-file/tests -q -p pmai_evals.reward && cat /tmp/t/reward.json
 ```
 
 To grade a Harbor trial again, set `TRIAL_LOGS=<trial>/agent`. A viewer task then reads the viewer snapshot in `<trial>/artifacts/logs/artifacts/viewer/snapshot/` and needs no viewer (old checks also need `uv run --with "moleculekit<1.12"`).

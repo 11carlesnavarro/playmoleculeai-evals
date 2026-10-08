@@ -1,6 +1,7 @@
 """Run old eval_sets checks.py functions, unchanged, against a Harbor trial.
 
-scripts/cases_to_tasks.py rewrites their `from pmai_evals.<old module> import` lines to this module.
+The port (scripts/cases_to_tasks.py, now in git history) rewrote their `from pmai_evals.<old module> import`
+lines to this module.
 """
 
 from dataclasses import dataclass, field

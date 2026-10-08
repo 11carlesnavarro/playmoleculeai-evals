@@ -11,7 +11,7 @@ from pydantic import Field
 from pmai_evals import trajectory, trial
 
 HOME = "/logs/agent/home"  # pmai config home: agent_config.yaml + agent.db, synced to the host
-# Viewer tasks only (viewer/compose.yaml sets VIEWER_URL): the sidecar opens PMView on this project.
+# Viewer tasks only (docker/viewer/compose.yaml sets VIEWER_URL): the sidecar opens PMView on this project.
 # A 503 stops the script with the reason: an infra error, not a turn without the viewer.
 OPEN_VIEWER = """python3 -c '
 import sys, urllib.error, urllib.request

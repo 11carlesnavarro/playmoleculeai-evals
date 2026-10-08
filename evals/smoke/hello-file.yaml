@@ -1,0 +1,13 @@
+n_attempts: 1
+n_concurrent_trials: 2
+datasets:
+  - path: evals/smoke/cases
+agents:
+  - name: pmai
+    import_path: pmai_evals.agent:PmaiAgent
+    model_name: gpt-6-luna
+    env:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+verifier:
+  env:
+    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}  # only judge() needs it

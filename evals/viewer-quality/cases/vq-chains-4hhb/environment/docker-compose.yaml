@@ -1,0 +1,28 @@
+# Viewer tasks: environment/docker-compose.yaml is a copy of this file (tests/test_tasks.py checks
+# the copies), and Harbor adds it to the trial. Harbor runs compose with its
+# own env, so ${PM*} come from .env (make run), VIEWER_PRELOAD from the task's [environment] env, and
+# HOST_ARTIFACTS_PATH is the trial's artifacts folder.
+services:
+  main:
+    environment:
+      VIEWER_URL: http://viewer:9000  # agent.py opens the viewer, trial.py reads it
+    volumes: ["project:/app"]  # filled from the image's /app on first use
+    depends_on:
+      viewer: {condition: service_healthy}
+  viewer:
+    image: pmai-viewer:latest
+    environment:
+      PMVIEW_URL:  # the site that serves PMView; not set: the default in server.py
+      PM_EMAIL: ${PM_EMAIL:?set it in .env}
+      PM_PASSWORD: ${PM_PASSWORD:?set it in .env}
+      AGENT_WS: ws://main:8100/v1/ws/eval  # port: the pmai config (docker/configs/*), id: --viewer-id in agent.py
+      VIEWER_PRELOAD: ${VIEWER_PRELOAD:-}  # {"pdb_ids": [...], "files": [...]} in the viewer before the turn
+    volumes:
+      - project:/files/app
+      - ${HOST_ARTIFACTS_PATH:?Harbor sets it}:/logs/artifacts  # events.jsonl and final.png
+    healthcheck:  # 200 when the browser has started, or failed to start (then /open gives the reason)
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/healthz')"]
+      interval: 5s
+      retries: 60
+volumes:
+  project:

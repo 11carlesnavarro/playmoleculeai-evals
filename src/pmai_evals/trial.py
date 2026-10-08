@@ -17,7 +17,7 @@ LOGS = Path(os.environ.get("TRIAL_LOGS", "/logs/agent"))  # set it to grade a ha
 DB = LOGS / "home" / "agent.db"
 _work = LOGS / "work_dir"
 WORK = Path(_work.read_text().strip()) if _work.exists() else Path("/app")
-VIEWER = os.environ.get("VIEWER_URL")  # viewer tasks only: viewer/compose.yaml sets it
+VIEWER = os.environ.get("VIEWER_URL")  # viewer tasks only: docker/viewer/compose.yaml sets it
 # /logs/artifacts: Harbor keeps it on the host at <trial>/artifacts/logs/artifacts
 ARTIFACTS = LOGS.parent / ("artifacts" if Path("/logs/agent") == LOGS else "artifacts/logs/artifacts")
 SNAPSHOT = ARTIFACTS / "viewer" / "snapshot"  # next to the sidecar's evidence
@@ -91,10 +91,10 @@ def cost_usd() -> float:
 
 
 def _viewer(path: str, data: bytes | None = None) -> bytes:
-    """The viewer sidecar's control API (viewer/server.py). A sidecar that cannot answer is an infra
+    """The viewer sidecar's control API (docker/viewer/server.py). A sidecar that cannot answer is an infra
     error: the trial gets no reward, not a 0."""
     if not VIEWER:
-        raise InfraError("no viewer: the task needs environment/docker-compose.yaml -> viewer/compose.yaml")
+        raise InfraError("no viewer: the task needs environment/docker-compose.yaml (docker/viewer)")
     try:
         with urllib.request.urlopen(VIEWER + path, data, timeout=300) as r:
             return r.read()

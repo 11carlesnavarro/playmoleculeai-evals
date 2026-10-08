@@ -1,4 +1,4 @@
-"""viewer/server.py with a fake PMView socket and a fake pmai: no browser."""
+"""docker/viewer/server.py with a fake PMView socket and a fake pmai: no browser."""
 
 import asyncio
 import json
@@ -163,7 +163,7 @@ def test_no_pmview_is_an_infra_error(monkeypatch):
             assert r.status == 503
             r = await s.control.post("/python", data="1")  # after a failed /open: no wait, the reason
             assert (r.status, await r.text()) == (503, f"no project other in {server.FILES}: see the "
-                                                       "volumes in viewer/compose.yaml")
+                                                       "volumes in compose.yaml")
             s.browser.broken = "no WebGL2: Mol* cannot draw"
             r = await s.control.get("/open", params={"project": "app"})
             assert (r.status, await r.text()) == (503, "no WebGL2: Mol* cannot draw")

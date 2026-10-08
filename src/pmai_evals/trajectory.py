@@ -1,7 +1,7 @@
 """agent.db -> agent/trajectory.json (Harbor's ATIF), so `make view` shows each step of the turn.
 
 agent.py writes it after the turn. For trials that are already done:
-    uv run python -m pmai_evals.trajectory jobs/<job>/<trial> ...
+    uv run python -m pmai_evals.trajectory results/<job>/<trial> ...
 Viewer tasks: each step also shows the viewer page after each of its viewer commands (the sidecar's
 screenshots). Only the main chat: a subagent's steps are in agent.db.
 """

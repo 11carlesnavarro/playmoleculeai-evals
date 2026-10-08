@@ -15,37 +15,13 @@ The plan page shows the idea. This file is the work list. Do the phases in order
 
 Facts checked in the code (Harbor 0.24.0 source, pmbackend, pmview, playmoleculeAI) are marked `[checked]`. Points to try first are marked `[verify]`.
 
-## Target layout
+## Layout
 
-```text
-playmoleculeai-evals/
-├── Makefile                      image, viewer, run, test
-├── .env.example                  keys and eval account (never committed: .env)
-├── image/Dockerfile              pmai-eval: sandbox + pmai + grader
-├── viewer/                       phase 5
-│   ├── Dockerfile                pmai-viewer: Chromium + server (PMView comes from the site)
-│   ├── server.py                 opens the PMView site; takes its agent socket and project files + control API
-│   └── compose.yaml              the sidecar service: each viewer task has a copy (environment/docker-compose.yaml)
-├── config/<name>/agent_config.yaml   pmai configs, baked at /opt/pmai-config
-├── src/pmai_evals/
-│   ├── agent.py                  Harbor agent (host side)
-│   ├── trial.py                  what tests ask about a trial (stdlib)
-│   ├── reward.py                 pytest plugin: scores to reward.json
-│   ├── judge.py                  LLM judge
-│   └── legacy.py                 runs old checks.py functions unchanged
-├── tasks/<set>/<case>/           Harbor tasks: the eval cases
-├── experiments/*.yaml            Harbor job configs (results go to jobs/, gitignored)
-├── scripts/cases_to_tasks.py     one time port from eval_sets/
-├── scripts/legacy_test_case.py   test file copied into every ported task
-├── scripts/compare_old.py        a job against the old runs in the archive
-├── scripts/eval_account.py       phase 4
-├── tests/                        unit tests for src/ and viewer/ (fake PMView socket, no browser)
-└── eval_sets/                    deleted set by set, after each port is verified
-```
+The README has the map of the repo. Since 2026-10-08, each eval has one folder in `evals/` (its cases, its job files and a README), the container parts are in `docker/`, and run results go to `results/`.
 
 ---
 
-## Status (2026-10-07)
+## Status (2026-10-08)
 
 - Phases 0 and 1 are done. The files are the reference. The two sections below give only the changes from the first plan and the checks.
 - Phase 2: 40 tasks ported, and the port gives the old scores on 480 old trials. In Docker, `acellera-sample` (one case per set, gpt-6-luna) gave reward 1.0 on 4 of 4 trials, for less than $0.01.
@@ -53,12 +29,14 @@ playmoleculeai-evals/
   the `.env` OpenAI key is archived (401), and then `populate_context_post_run` crashed on the read only `agent.db`, which stopped the trial before the verifier. Both causes are known; the crash is fixed. Run the smoke job again with a working key.
 - Phase 3: done. `sa-models` and `skills-ab` ran in Docker (results in the phase 3 section). The image now has the skills (it had none before).
 - Phase 4: done. The eval account is `carles` (the user's account, `PM_EMAIL` in `.env`); `scripts/eval_account.py check` logs in on the dev backend.
-- Phase 5: `pmai run --viewer-id` is in playmoleculeAI. The sidecar opens the deployed PMView site; the image, the compose file, the agent script change and the `trial.py` viewer functions are done, with unit tests. The 5.8 try passed on computer19 against production, with one pmai turn (2026-10-07). 5.7: molecular-visualization is ported (10 tasks, preload, field adapter); the grading path passed against production with no model. `experiments/viewer.yaml` on Harbor (2026-10-08): mv-1jpz, mv-2ity and mv-7fab all reward 1.0, about $0.003 a turn. 5.9: the trace in `make view`. Next: the full set (10 tasks).
-- Viewer quality (2026-10-08): 20 cases in `tasks/viewer-quality`, from the trace mining. Next: the baseline run, then the user rates the images.
+- Phase 5: `pmai run --viewer-id` is in playmoleculeAI. The sidecar opens the deployed PMView site; the image, the compose file, the agent script change and the `trial.py` viewer functions are done, with unit tests. The 5.8 try passed on computer19 against production, with one pmai turn (2026-10-07). 5.7: molecular-visualization is ported (10 tasks, preload, field adapter); the grading path passed against production with no model. `evals/acellera-bench/viewer.yaml` on Harbor (2026-10-08): mv-1jpz, mv-2ity and mv-7fab all reward 1.0, about $0.003 a turn. 5.9: the trace in `make view`. Next: the full set (10 tasks).
+- Viewer quality (2026-10-08): 20 cases in `evals/viewer-quality/cases`, from the trace mining. Next: the baseline run, then the user rates the images.
+- New layout (2026-10-08): `tasks/` and `experiments/` became `evals/<eval>/cases/` and `evals/<eval>/*.yaml`; `image/`, `viewer/` and `config/` are in `docker/`; `jobs/` is `results/`. `eval_sets/` and the port scripts (`cases_to_tasks.py`, `legacy_test_case.py`, `compare_old.py`) are removed: they are in git history. Paths in the done phases below use the new names.
 - The old harness is removed. All of it is in `/fast_shared/users/carles/data/playmoleculeAIdata/evals-archive-2026-10-05/`:
   - `repo-before-cleanup.tar.gz`: the repo before the cleanup (old src, tests, scripts, mining, development, docs, playwright). Not in it: `.env`, `playwright/.auth`, `.venv`, `.git`, bixbench fixtures.
   - `runs/`: the old run results (34 GB), the baseline for phase 2.
   - `git-head.txt`, `git-status.txt`.
+  - `eval_sets/`: bixbench and bixbench-verified, cases and fixtures (22 GB), moved here on 2026-10-08 for the bixbench port.
 
 ## Phase 0. Tooling (done)
 
@@ -66,7 +44,7 @@ Files: `pyproject.toml`, `uv.lock`, `.env.example`, `.gitignore`, `.dockerignore
 
 Changes from the first plan:
 - `pyproject.toml` is new, with one dependency: `harbor==0.24.0`. `anthropic`, `pytest` and `ruff` are dev only, because `judge.py` runs in the image.
-- `.dockerignore` sends only `dist/`, `config/`, `src/` and `viewer/` to the build. `eval_sets/` is 22 GB.
+- `.dockerignore` sends only `dist/`, `docker/` and `src/` to the build (the repo once had 22 GB of bixbench data).
 - `make image` builds the PMAI sdist first, then the wheel from it. A direct `uv build --wheel` reuses `playmoleculeAI/build/lib`, which still has `agents/builtin/{researcher,reviewer,scout}` (deleted from src). Then pmai fails on start: `researcher/AGENT.md: description: Unexpected keyword argument`.
 - `make lint` is new. `make viewer`: phase 5.
 - `make run` exports `.env`, because Harbor reads `${VAR}` in job files from the process env `[checked]`. `HARBOR_TELEMETRY=off`: telemetry is on by default and sends job ids, models and cost.
@@ -75,15 +53,15 @@ Checked: `uv run harbor --version` prints 0.24.0. `make -n` for all targets.
 
 ## Phase 1. Walking skeleton (done, smoke reward in Docker still to see)
 
-Files: `config/default/agent_config.yaml`, `image/Dockerfile`, `src/pmai_evals/{agent,trial,reward,judge}.py`, `tasks/smoke/hello-file/`, `experiments/smoke.yaml`, `tests/`.
+Files: `docker/configs/default/agent_config.yaml`, `docker/eval/Dockerfile`, `src/pmai_evals/{agent,trial,reward,judge}.py`, `evals/smoke/cases/hello-file/`, `evals/smoke/hello-file.yaml`, `tests/`.
 
 Changes from the first plan:
-- `config/default`: `config_version: 1`. Without it, pmai rewrites the file on start and keeps a `.v0.bak`. No `codebase_search` and no `literature`: both start, but their tools fail in the container (no `SEARCH_URL` service, no literature data). Phase 3 can add them again with `SEARCH_URL` in the job env, if the container can reach the service.
+- `docker/configs/default`: `config_version: 1`. Without it, pmai rewrites the file on start and keeps a `.v0.bak`. No `codebase_search` and no `literature`: both start, but their tools fail in the container (no `SEARCH_URL` service, no literature data). Phase 3 can add them again with `SEARCH_URL` in the job env, if the container can reach the service.
 - `agent.py`: `--model` only when the job sets a model. Else pmai uses the default of the config.
 - `trial.py`: `TRIAL_LOGS` (default `/logs/agent`) sets the folder of `home/agent.db` and `work_dir`. With it, the task tests grade a hand run on the host (see the README).
 - `judge.py`: the request streams, with adaptive thinking. An empty answer is FAIL.
-- `experiments/smoke.yaml`: `${ANTHROPIC_API_KEY:-}`. Harbor stops the job when a `${VAR}` is not set `[checked]`, and the smoke task has no judge.
-- On the host, the trial files from the container belong to `nobody` (NFS root squash). `agent.db` is in WAL mode, so a reader must create `agent.db-shm`: `trial.q` reads a copy when the folder is read only. The agent script makes `/logs/agent` writable on exit, so the host user can delete `jobs/`. `populate_context_post_run` never raises: Harbor calls it before the verifier.
+- `evals/smoke/hello-file.yaml`: `${ANTHROPIC_API_KEY:-}`. Harbor stops the job when a `${VAR}` is not set `[checked]`, and the smoke task has no judge.
+- On the host, the trial files from the container belong to `nobody` (NFS root squash). `agent.db` is in WAL mode, so a reader must create `agent.db-shm`: `trial.q` reads a copy when the folder is read only. The agent script makes `/logs/agent` writable on exit, so the host user can delete `results/`. `populate_context_post_run` never raises: Harbor calls it before the verifier.
 - Unit tests: also `test_agent.py` (the script and `populate_context_post_run`) and `test_judge.py` (a fake client). `test_reward.py` also checks that a setup error gives 0.
 
 Checked:
@@ -93,7 +71,7 @@ Checked:
 | `make test`, `make lint` | 7 passed, clean |
 | `Task.is_valid_dir`, `JobConfig` with `extra="forbid"`, agent class, preflight, dataset tasks | all OK |
 | Agent script: `bash -n`, and the viewer probe with no sidecar | OK; the probe fails in 0.2 s, no extra flags |
-| `pmai run` from the PMAI source venv, `config/default`, smoke prompt | exit 0, `hello.txt` OK, 45 events |
+| `pmai run` from the PMAI source venv, `docker/configs/default`, smoke prompt | exit 0, `hello.txt` OK, 45 events |
 | `pmai run` from the wheel, in a new Python 3.12 venv, outside the source tree | exit 0 |
 | Smoke tests on both runs with `TRIAL_LOGS`, also in a venv with only pytest | reward 1.0 |
 | `populate_context_post_run` on the real `agent.db` | 6334 in, 3145 cached, 47 out, $0.00037 |
@@ -105,9 +83,9 @@ Hand run gotchas:
 Next:
 
 ```bash
-docker run --rm $SANDBOX id        # [verify] not root: restore USER in image/Dockerfile
+docker run --rm $SANDBOX id        # [verify] not root: restore USER in docker/eval/Dockerfile
 make image && docker run --rm pmai-eval:latest pmai --help
-make run JOB=experiments/smoke.yaml && make view
+make run JOB=evals/smoke/hello-file.yaml && make view
 ```
 
 **Done when:** `harbor view` shows hello-file with reward 1.0, tokens and cost.
@@ -120,14 +98,14 @@ Only `molecular-visualization` reads viewer data (`viewer_state`, `viewer_select
 
 Behaviour note: in these runs the viewer tools are offered but fail with "No viewer is connected" `[checked]`. The agent uses moleculekit in bash. Phase 5 runs them again with the viewer.
 
-Files: `src/pmai_evals/legacy.py`, `scripts/legacy_test_case.py`, `scripts/cases_to_tasks.py`, `scripts/compare_old.py`, `experiments/acellera-{sample,noviewer}.yaml`, `tasks/{structure-analysis,cheminformatics-analysis,retrieval-and-selection,3d-reasoning}/` (40 tasks), `tests/test_legacy.py`.
+Files: `src/pmai_evals/legacy.py`, `scripts/legacy_test_case.py`, `scripts/cases_to_tasks.py`, `scripts/compare_old.py`, `evals/acellera-bench/{sample,noviewer}.yaml`, `evals/acellera-bench/cases/{structure-analysis,cheminformatics-analysis,retrieval-and-selection,3d-reasoning}/` (40 tasks), `tests/test_legacy.py`.
 
 Changes from the first plan:
 - `legacy.py` has only what these four sets use: `PYTHON_CHECK_TYPE`, `AssertionResult`, `RunArtifact` (`project_files_dir`, `final_answer`) and `check()`. Phase 5 adds the viewer methods, and bixbench adds `Settings` and `AssertionConfigError` (code in the first version of this file, commit 5ab2416).
 - `cases_to_tasks.py` stops on a set whose checks read viewer data (phase 5). A `preload.viewer.pdb_ids` is not loaded (`rs-numbering`: the prompt names 1TTR). It copies to `tests/fixtures/` only the files that the checks read (`FIXTURES / "ground_truth.json"`).
 - The grader venv in the image has `rdkit`: `cheminformatics-analysis` compares SMILES with it, and without it a correct but different SMILES gets 0 with no error.
 - `cheminformatics-analysis` is the old `bioactivity-and-sar` (same case ids).
-- Ruff does not check `tasks/*/*/tests/checks.py`: old code, copied unchanged.
+- Ruff does not check `evals/acellera-bench/cases/*/*/tests/checks.py`: old code, copied unchanged.
 
 Checked: the old trials graded again with the ported tasks, with no model and no Docker. For each old trial, an `agent.db` with its `final_answer.md`, `work_dir` = its `project_files/`, and the task tests in a venv with only pytest and rdkit:
 
@@ -141,8 +119,8 @@ The regrade above already shows that the grading is the same. What Docker adds: 
 
 ```bash
 make image                       # again: the grader venv now has rdkit
-make run JOB=experiments/acellera-sample.yaml        # 4 trials, gpt-6-luna, a few cents
-uv run python scripts/compare_old.py jobs/acellera-sample
+make run JOB=evals/acellera-bench/sample.yaml        # 4 trials, gpt-6-luna, a few cents
+uv run python scripts/compare_old.py results/acellera-sample
 ```
 
 `compare_old.py` costs nothing: it reads the job `result.json` files and the old `grade.json` files, and prints the mean reward per case, old and new. A trial with no verifier result is an infra error, not a 0.
@@ -151,34 +129,34 @@ uv run python scripts/compare_old.py jobs/acellera-sample
 
 Result (2026-10-05): reward 1.0 on dr-0001, rs-uniprot, sa-0071 and sar-descriptors, 0 tool errors, 14 to 62 s for each agent run. Harbor marked each trial with `NonZeroAgentExitCodeError`: the exit trap ran `chmod` on parts of `/logs/agent` that belong to the host user, and with `set -e` that failure became exit 1. Fixed: the trap keeps the exit code (`|| true`, then `exit $rc`).
 
-Each `make run` writes a new `jobs/<job file>-<date>/`. A fixed `job_name` made Harbor resume the old job and keep its finished trials, also the failed ones. `make run NAME=<old job>` resumes a job on purpose.
+Each `make run` writes a new `results/<eval>-<job file>-<date>/`. A fixed `job_name` made Harbor resume the old job and keep its finished trials, also the failed ones. `make run NAME=<old job>` resumes a job on purpose.
 
-Optional: `experiments/acellera-noviewer.yaml` runs all 40 tasks once with `gpt-6-luna` (about $0.60). The old runs used `gpt-5.4`, so the pass rates show the model change too. A run with `gpt-5.4` and 3 seeds, as the old runs, costs about $45: do it only if the user asks.
+Optional: `evals/acellera-bench/noviewer.yaml` runs all 40 tasks once with `gpt-6-luna` (about $0.60). The old runs used `gpt-5.4`, so the pass rates show the model change too. A run with `gpt-5.4` and 3 seeds, as the old runs, costs about $45: do it only if the user asks.
 
 Default for eval runs: `gpt-6-luna` and `n_attempts: 1`, as few tasks as answer the question.
 
 ### 2.5 Delete the old harness (done on 2026-10-05)
 
-The old harness, `mining/`, `development/`, the old docs and scripts are removed (see Status). Still to do: remove each `eval_sets/acellera-bench/<set>` after its tasks run in Docker (2.4).
+The old harness, `mining/`, `development/`, the old docs and scripts are removed (see Status). `eval_sets/` and the port scripts are removed too (2026-10-08, in git history).
 
-bixbench: later. Its fixtures are 16 GB and 5.8 GB. Do not copy them into tasks: bind mount them read only in the job file.
+bixbench: later. Its old cases and fixtures (16 GB and 5.8 GB) are in the archive, `eval_sets/`. Do not copy the fixtures into cases: bind mount them read only in the job file.
 
 ---
 
 ## Phase 3. The matrix (done)
 
-Files: `config/no-skills/`, `experiments/{sa-models,skills-ab}.yaml`, the `reasoning_effort` option and the arm label (`to_agent_info`) in `src/pmai_evals/agent.py`, the skills in `image/Dockerfile` and `make image`.
+Files: `docker/configs/no-skills/`, `evals/acellera-bench/{sa-models,skills-ab}.yaml`, the `reasoning_effort` option and the arm label (`to_agent_info`) in `src/pmai_evals/agent.py`, the skills in `docker/eval/Dockerfile` and `make image`.
 
 ```text
-config/
+docker/configs/
 ├── default/agent_config.yaml
 └── no-skills/agent_config.yaml      same as default, skills plugin removed
 ```
 
 | Job | Arms (label in `make view`) | Trials |
 |---|---|---|
-| `experiments/sa-models.yaml` | `pmai-effort-xhigh` gpt-6-luna, `pmai-effort-xhigh` glm-5.3-flash, `pmai-effort-low` gpt-6-luna | 30 |
-| `experiments/skills-ab.yaml` | `pmai` (image skills), `pmai-no-skills`; both gpt-6-luna | 20 |
+| `evals/acellera-bench/sa-models.yaml` | `pmai-effort-xhigh` gpt-6-luna, `pmai-effort-xhigh` glm-5.3-flash, `pmai-effort-low` gpt-6-luna | 30 |
+| `evals/acellera-bench/skills-ab.yaml` | `pmai` (image skills), `pmai-no-skills`; both gpt-6-luna | 20 |
 
 Changes from the first plan:
 - `n_attempts: 1`, no `job_name` (`make run` names each job). pass@3 is a `make run` with `n_attempts: 3` when a result needs it.
@@ -194,8 +172,8 @@ To run (each job less than $1):
 
 ```bash
 make image                                   # again: the image now has the skills
-make run JOB=experiments/sa-models.yaml      # needs FIREWORKS_API_KEY in .env
-make run JOB=experiments/skills-ab.yaml
+make run JOB=evals/acellera-bench/sa-models.yaml      # needs FIREWORKS_API_KEY in .env
+make run JOB=evals/acellera-bench/skills-ab.yaml
 make view
 ```
 
@@ -303,7 +281,7 @@ No Playwright trace: a trace records the login form (with the password) and the 
 
 In playmoleculeAI `cli.py` (d5a3f3fb, pushed by the user). `pmai run --viewer-id ID` serves the API during the turn (on `AGENT_PORT`, else the YAML port) and sends viewer commands to the viewer that connects at `/v1/ws/ID`. The chat records the viewer id, as for a browser chat. `--serve` serves the API with no viewer (phase 6).
 
-### 5.2 `viewer/server.py` and `tests/test_viewer_server.py` (done)
+### 5.2 `docker/viewer/server.py` and `tests/test_viewer_server.py` (done)
 
 The files are the reference. Environment: `PMVIEW_URL`, `PM_EMAIL`, `PM_PASSWORD`, `AGENT_WS` (compose sets `ws://main:8100/v1/ws/eval`; the default `ws://localhost:8100/v1/ws/eval` is for 5.8), `VIEWER_PRELOAD` (JSON `{"pdb_ids", "files"}`), `FILES_ROOT`, `EVIDENCE_DIR`, `READY_TIMEOUT`.
 
@@ -327,15 +305,15 @@ The image on computer19 against production (2026-10-07, by the user, 5.8 with `-
 - `/healthz` ok, `/open` ready, `/python` ran, `/screenshot` PNG.
 - One `pmai run --viewer-id eval` turn (gpt-6-luna, in `pmai-eval:latest`): `run_bash` downloaded 1CRN to `structures/`, `pmview_load` loaded it from the trial folder through the route, `pmview_run_python` set the style. After the turn, `pmv.get_viewer_state()` gave the system `1CRN_assembly1.pdb` with style `cartoon`.
 
-Not checked yet: a Harbor trial with `viewer/compose.yaml`.
+Not checked yet: a Harbor trial with `docker/viewer/compose.yaml`.
 
-### 5.3 `viewer/Dockerfile` and `make viewer` (written)
+### 5.3 `docker/viewer/Dockerfile` and `make viewer` (written)
 
 `make viewer` builds `pmai-viewer:latest`: the Playwright 1.58.0 image and `server.py`. The image has Chromium in `/ms-playwright`, but not the Python package, so the Dockerfile installs `playwright==1.58.0` (the same version as the browsers) and `aiohttp`. No PMView files: the site serves them.
 
-### 5.4 `viewer/compose.yaml` (written)
+### 5.4 `docker/viewer/compose.yaml` (written)
 
-Each viewer task has `environment/docker-compose.yaml`, a copy of `viewer/compose.yaml` (`cases_to_tasks.py` writes it; `tests/test_tasks.py` fails when a copy is old). Not a link: Harbor refuses a link out of the task for a git dataset, and its environment hash skips links. Harbor adds a task's compose file to the trial, so a viewer task always gets its viewer, and other tasks in the same job start no browser. The job file needs nothing.
+Each viewer task has `environment/docker-compose.yaml`, a copy of `docker/viewer/compose.yaml` (`cases_to_tasks.py` writes it; `tests/test_tasks.py` fails when a copy is old). Not a link: Harbor refuses a link out of the task for a git dataset, and its environment hash skips links. Harbor adds a task's compose file to the trial, so a viewer task always gets its viewer, and other tasks in the same job start no browser. The job file needs nothing.
 
 - Harbor runs compose with the process env, so `${PM*}` come from `.env` (`make run` exports it) `[checked]`. Harbor sets `HOST_ARTIFACTS_PATH` from its own `/logs/artifacts` mount `[checked]`.
 - `main` gets `VIEWER_URL=http://viewer:9000` and starts only when the viewer is healthy. The viewer gets `AGENT_WS=ws://main:8100/v1/ws/eval`: 8100 is `port` in the pmai config. Not `AGENT_PORT`: it moves only the port that pmai listens on, and the tools still call back on the config port (playmoleculeAI `core/installation.py:12`). A fix in pmai can use one port for both.
@@ -382,12 +360,12 @@ The old checks read other field names. An adapter in `legacy.py` maps them:
 | `load_system(name)`, `system_files()` from the export zip | the systems in the viewer by name without the extension, through `pmv.get_system(uuid)` as mmCIF |
 
 ```bash
-uv run python scripts/cases_to_tasks.py eval_sets/acellera-bench/molecular-visualization tasks/molecular-visualization
+uv run python scripts/cases_to_tasks.py eval_sets/acellera-bench/molecular-visualization evals/acellera-bench/cases/molecular-visualization
 make image viewer   # both changed: legacy.py and trial.py are in pmai-eval, server.py in pmai-viewer
-make run JOB=experiments/viewer.yaml
+make run JOB=evals/acellera-bench/viewer.yaml
 ```
 
-`experiments/viewer.yaml`: mv-1jpz (a preload and a viewer selection), mv-2ity (colors and styles), mv-7fab (a selection). gpt-6-luna, 1 attempt, less than $0.05. The full set only after that sample passes.
+`evals/acellera-bench/viewer.yaml`: mv-1jpz (a preload and a viewer selection), mv-2ity (colors and styles), mv-7fab (a selection). gpt-6-luna, 1 attempt, less than $0.05. The full set only after that sample passes.
 
 - The old cases preloaded `pdb_ids` and `files` in the viewer: now `VIEWER_PRELOAD` (mv-1ca2, mv-1jpz). The files also go to the project, as before.
 - `legacy.check` raises `InfraError` again: an infra error gives no reward, not a 0.
@@ -400,7 +378,7 @@ One `pmai run` turn on the host with gpt-6-luna: less than $0.01.
 
 ```bash
 make viewer
-mkdir -p /tmp/t1/app /tmp/t1/home /tmp/t1/artifacts && cp config/default/agent_config.yaml /tmp/t1/home/
+mkdir -p /tmp/t1/app /tmp/t1/home /tmp/t1/artifacts && cp docker/configs/default/agent_config.yaml /tmp/t1/home/
 # host network: on computer19 a -p port mapping connects but never answers (2026-10-07)
 docker run --rm --name pmai-viewer-try --network host --env-file .env \
   -v /tmp/t1:/files -v /tmp/t1/artifacts:/logs/artifacts pmai-viewer:latest
@@ -422,7 +400,7 @@ curl -o /tmp/t1/shot.png localhost:9000/screenshot
 
 Viewer tasks: after each of pmai's commands, the sidecar logs `pmai_result` (before pmai gets the result) and 1 s later saves a JPEG of the page in `viewer/steps/`. The step of that command shows it: a result comes back before pmai saves its response in `agent.db`, so the screenshot goes to the first response saved after it.
 
-For trials that are done: `uv run python -m pmai_evals.trajectory jobs/<job>/<trial> ...`. The 3 trials of the first `experiments/viewer.yaml` run (2026-10-08, all reward 1.0) have it, without the sidecar screenshots (the sidecar took none then). The running `make view` served the trace and its images `[checked]`.
+For trials that are done: `uv run python -m pmai_evals.trajectory results/<job>/<trial> ...`. The 3 trials of the first `evals/acellera-bench/viewer.yaml` run (2026-10-08, all reward 1.0) have it, without the sidecar screenshots (the sidecar took none then). The running `make view` served the trace and its images `[checked]`.
 
 **Done when:** molecular-visualization passes on Harbor at the old harness rate, and nobody opens a browser.
 
@@ -432,9 +410,9 @@ For trials that are done: `uv run python -m pmai_evals.trajectory jobs/<job>/<tr
 
 The old viewer tasks check the viewer state, so a view nobody can read still gets 1.0. This eval grades the final image: the viewport as the user sees it. Plan, with the trace mining: https://claude.ai/artifact/Jy2kpxN4vz6aAkGjhQZZYH (2026-10-08).
 
-- `tasks/viewer-quality/`: 20 cases from real chats (`[metadata] source` in each `task.toml`). Each prompt says to use the viewer. `tests/rubric.txt`: what a good image shows; line 1 is the gate.
+- `evals/viewer-quality/cases/`: 20 cases from real chats (`[metadata] source` in each `task.toml`). Each prompt says to use the viewer. `tests/rubric.txt`: what a good image shows; line 1 is the gate.
 - The test saves the image: `trial.final_image()` -> `artifacts/logs/artifacts/viewer/final-view.png` (the sidecar's `/screenshot`, PMView's viewport screenshot). The reward says only that it was saved.
-- `experiments/viewer-quality.yaml`: the 15 hill climbing cases. `experiments/viewer-quality-holdout.yaml`: the 5 held-out cases (keyword `holdout`), only to check that a gain is real.
+- `evals/viewer-quality/train.yaml`: the 15 hill climbing cases. `evals/viewer-quality/holdout.yaml`: the 5 held-out cases (keyword `holdout`), only to check that a gain is real.
 - No trajectory case yet: one image cannot show that frames are aligned.
 
 Steps:
@@ -473,7 +451,7 @@ def pending_jobs(engine, root_chat_id: str) -> bool:
 
 `[verify]` in PMAI: after the notice, `runtime.stream_agent(root)` returns the new turn's stream.
 
-### 6.2 `config/pm/agent_config.yaml`
+### 6.2 `docker/configs/pm/agent_config.yaml`
 
 ```yaml
 port: 8100              # AGENT_API_URL defaults to http://localhost:8100/v1
@@ -484,12 +462,12 @@ plugins:
     backend_endpoint: http://computer19.acellera.lan:8002/v3
 ```
 
-### 6.3 `experiments/pm-smoke.yaml`
+### 6.3 `evals/pm/smoke.yaml`
 
 ```yaml
 job_name: pm-smoke
 datasets:
-  - path: tasks/pm
+  - path: evals/pm/cases
 environment:
   mounts:   # the eval bucket, same path inside and outside (example path)
     - {type: bind, source: /data/pm/1234-jobs, target: /data/pm/1234-jobs}
@@ -507,7 +485,7 @@ agents:
 
 For viewer tasks with jobs, mount the same bucket in the sidecar: `volumes: ["/data/pm/1234-jobs:/files"]`.
 
-### 6.4 `tasks/pm/proteinprepare/tests/test_case.py`
+### 6.4 `evals/pm/cases/proteinprepare/tests/test_case.py`
 
 ```python
 from pmai_evals import trial
@@ -540,8 +518,8 @@ environment_mode = "separate"
 ```
 
 ```bash
-harbor run -c experiments/nightly.yaml -e modal -n 32     # only tasks with no bucket and no PM jobs
-0 2 * * * cd ~/playmoleculeai-evals && make run JOB=experiments/nightly.yaml
+harbor run -c evals/nightly.yaml -e modal -n 32     # only tasks with no bucket and no PM jobs
+0 2 * * * cd ~/playmoleculeai-evals && make run JOB=evals/nightly.yaml
 ```
 
 Every trial keeps a production `agent.db`: the analysis dashboard can load them as they are.
@@ -553,7 +531,7 @@ Every trial keeps a production `agent.db`: the analysis dashboard can load them 
 | Risk | Phase | Action |
 |---|---|---|
 | Provider keys and the service token are in the container env. The local backend gives `os.environ` to bash, so the agent can read them. | 1, 6 | Eval only keys. Later: strip them in `LocalBackend`. |
-| The sandbox image user is not root | 1 | Restore `USER` in `image/Dockerfile`; set `[agent].user` if needed. |
+| The sandbox image user is not root | 1 | Restore `USER` in `docker/eval/Dockerfile`; set `[agent].user` if needed. |
 | Bucket file owner: the backend and the cluster must read what the container writes | 6 | Run the agent as the bucket owner uid (`[agent].user`). |
 | SwiftShader WebGL is slow, Pyodide takes time to load | 5 | `/open` waits up to 5 min. Measured on ws12: ready in 14 s. |
 | PMView changes under us | 5 | We test what the site serves. The `ready` event records its build (script hash). Use production, not the dev site (Vite dev server). |

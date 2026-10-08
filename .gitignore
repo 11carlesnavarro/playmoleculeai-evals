@@ -15,9 +15,6 @@ __pycache__/
 # build: pmai wheel for the image
 dist/
 
-# harbor results
-jobs/
+# harbor results (make run)
+results/
 
-# BixBench capsule data: large
-eval_sets/bixbench/fixtures/*/
-eval_sets/bixbench-verified/fixtures/*/

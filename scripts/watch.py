@@ -1,7 +1,7 @@
 """Follow a running job: what each trial's agent does, and each new viewer image. Ctrl-C to stop.
 
-    make watch                                    the newest job in jobs/
-    uv run python scripts/watch.py jobs/<job>     another job
+    make watch                                    the newest job in results/
+    uv run python scripts/watch.py results/<job>  another job
 """
 
 import contextlib
@@ -76,7 +76,7 @@ def main(job: Path) -> None:
 
 
 if __name__ == "__main__":
-    newest = max(Path("jobs").iterdir(), key=lambda p: p.stat().st_mtime)
+    newest = max(Path("results").iterdir(), key=lambda p: p.stat().st_mtime)
     job = Path(sys.argv[1]) if len(sys.argv) > 1 else newest
     with contextlib.suppress(KeyboardInterrupt):
         main(job)

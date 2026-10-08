@@ -1,7 +1,6 @@
-# The build context is the repo root, and eval_sets/ holds GBs of data: send only what the image copies.
+# The build context is the repo root: send only what the images copy.
 *
 !dist/
-!config/
 !src/
-!viewer/
+!docker/
 **/__pycache__

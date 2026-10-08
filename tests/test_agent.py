@@ -112,7 +112,7 @@ def test_reasoning_effort(tmp_path):
     """The script line sets the top level effort of the real config, not the effort of a model entry."""
     home = tmp_path / "logs/agent/home"
     home.mkdir(parents=True)
-    default = Path("config/default/agent_config.yaml").read_text()
+    default = Path("docker/configs/default/agent_config.yaml").read_text()
     (home / "agent_config.yaml").write_text(default)
     line = script_line(tmp_path, "sed ", reasoning_effort="low")
     subprocess.run(["bash", "-c", line.replace("/logs/", f"{tmp_path}/logs/")], check=True)
@@ -131,7 +131,7 @@ def test_arm_names_are_the_labels(tmp_path):
 
 def test_no_skills_is_default_without_skills():
     def load(name):
-        return yaml.safe_load(Path(f"config/{name}/agent_config.yaml").read_text())
+        return yaml.safe_load(Path(f"docker/configs/{name}/agent_config.yaml").read_text())
 
     default = load("default")
     del default["plugins"]["skills"]
