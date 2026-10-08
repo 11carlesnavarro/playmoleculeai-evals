@@ -17,6 +17,7 @@ cp .env.example .env              # add the keys
 make image                        # pmai-eval:latest (needs Docker and ../playmoleculeAI)
 make viewer                       # pmai-viewer:latest, for viewer tasks only (opens the PMView site)
 make run JOB=experiments/smoke.yaml
+make watch                        # in a second shell: each call, message and viewer image as it happens
 make view                         # results in jobs/<job file>-<date>/
 uv run python scripts/compare_old.py jobs/<job>   # old harness vs new, per case
 ```

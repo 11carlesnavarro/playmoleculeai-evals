@@ -54,6 +54,7 @@ playmoleculeai-evals/
 - Phase 3: done. `sa-models` and `skills-ab` ran in Docker (results in the phase 3 section). The image now has the skills (it had none before).
 - Phase 4: done. The eval account is `carles` (the user's account, `PM_EMAIL` in `.env`); `scripts/eval_account.py check` logs in on the dev backend.
 - Phase 5: `pmai run --viewer-id` is in playmoleculeAI. The sidecar opens the deployed PMView site; the image, the compose file, the agent script change and the `trial.py` viewer functions are done, with unit tests. The 5.8 try passed on computer19 against production, with one pmai turn (2026-10-07). 5.7: molecular-visualization is ported (10 tasks, preload, field adapter); the grading path passed against production with no model. `experiments/viewer.yaml` on Harbor (2026-10-08): mv-1jpz, mv-2ity and mv-7fab all reward 1.0, about $0.003 a turn. 5.9: the trace in `make view`. Next: the full set (10 tasks).
+- Viewer quality (2026-10-08): 20 cases in `tasks/viewer-quality`, from the trace mining. Next: the baseline run, then the user rates the images.
 - The old harness is removed. All of it is in `/fast_shared/users/carles/data/playmoleculeAIdata/evals-archive-2026-10-05/`:
   - `repo-before-cleanup.tar.gz`: the repo before the cleanup (old src, tests, scripts, mining, development, docs, playwright). Not in it: `.env`, `playwright/.auth`, `.venv`, `.git`, bixbench fixtures.
   - `runs/`: the old run results (34 GB), the baseline for phase 2.
@@ -424,6 +425,21 @@ Viewer tasks: after each of pmai's commands, the sidecar logs `pmai_result` (bef
 For trials that are done: `uv run python -m pmai_evals.trajectory jobs/<job>/<trial> ...`. The 3 trials of the first `experiments/viewer.yaml` run (2026-10-08, all reward 1.0) have it, without the sidecar screenshots (the sidecar took none then). The running `make view` served the trace and its images `[checked]`.
 
 **Done when:** molecular-visualization passes on Harbor at the old harness rate, and nobody opens a browser.
+
+---
+
+## Viewer quality: the first hill climbing eval
+
+The old viewer tasks check the viewer state, so a view nobody can read still gets 1.0. This eval grades the final image: the viewport as the user sees it. Plan, with the trace mining: https://claude.ai/artifact/Jy2kpxN4vz6aAkGjhQZZYH (2026-10-08).
+
+- `tasks/viewer-quality/`: 20 cases from real chats (`[metadata] source` in each `task.toml`). Each prompt says to use the viewer. `tests/rubric.txt`: what a good image shows; line 1 is the gate.
+- The test saves the image: `trial.final_image()` -> `artifacts/logs/artifacts/viewer/final-view.png` (the sidecar's `/screenshot`, PMView's viewport screenshot). The reward says only that it was saved.
+- `experiments/viewer-quality.yaml`: the 15 hill climbing cases. `experiments/viewer-quality-holdout.yaml`: the 5 held-out cases (keyword `holdout`), only to check that a gain is real.
+- No trajectory case yet: one image cannot show that frames are aligned.
+
+Steps:
+
+1. The cases (written). 2. Baseline run, gpt-6-luna. 3. The user rates the final images against the rubric. 4. A judge (gpt-6.1-sol) that agrees with the ratings. 5. Hill climb: one change a round (skill, tools, model; PMView issues go to its team). 6. Freeze a regression set. 7. The same cases with MoleculeKit `mol.render`.
 
 ---
 

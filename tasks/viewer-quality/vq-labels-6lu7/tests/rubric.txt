@@ -1,0 +1,5 @@
+The N3 inhibitor (chain C) is visible in the pocket.
+The contact residues show as sticks, with one label each.
+The labels are readable: they do not overlap each other or cover the inhibitor.
+The view is zoomed on the binding site.
+Waters are hidden.

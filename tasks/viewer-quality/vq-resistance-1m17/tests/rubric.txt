@@ -1,0 +1,4 @@
+Thr790 and erlotinib are both visible and close together in the view.
+Thr790 is easy to find: sticks with a distinct color, or a label.
+Nothing is in front of the space between Thr790 and the inhibitor.
+The rest of the protein is muted, and waters are hidden.

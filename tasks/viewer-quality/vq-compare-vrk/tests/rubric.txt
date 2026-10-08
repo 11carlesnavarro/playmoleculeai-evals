@@ -1,0 +1,4 @@
+Both structures are visible and overlap well (aligned), not side by side or apart.
+The two proteins have two distinct colors.
+The differing pocket residues show as sticks and are easy to find.
+The view is zoomed on the ATP pocket, not on the whole proteins.

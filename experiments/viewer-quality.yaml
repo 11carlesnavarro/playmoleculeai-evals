@@ -1,0 +1,16 @@
+# Viewer quality, the 15 hill climbing cases (tasks/viewer-quality; the 5 others are in
+# viewer-quality-holdout.yaml). make viewer first. gpt-6-luna, once: expect less than $1.
+# The score is your rating of artifacts/logs/artifacts/viewer/final-view.png; the reward says only that it was saved.
+n_attempts: 1
+n_concurrent_trials: 3
+datasets:
+  - path: tasks/viewer-quality
+    task_names: [vq-chains-4hhb, vq-cleanup-1jpz, vq-compare-vrk, vq-covalent-6oim, vq-deepsite-7y5k,
+                 vq-glycans-6vxx, vq-hbonds-1iep, vq-interface-1n8z, vq-labels-6lu7, vq-pocket-1hsg,
+                 vq-pocket-1m17, vq-poses-1iep, vq-resistance-1m17, vq-slide-3ptb, vq-surface-1a52]
+agents:
+  - name: pmai
+    import_path: pmai_evals.agent:PmaiAgent
+    model_name: gpt-6-luna
+    env:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}

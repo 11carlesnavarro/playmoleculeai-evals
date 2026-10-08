@@ -1,0 +1,5 @@
+MK1 is in the center of the view and fully visible: no cartoon, surface or atoms in front of it.
+The binding-site residues show as full residues (sticks), not only side chains or single atoms.
+The camera is close: the binding site fills most of the view.
+Waters are hidden, and the rest of the protein is muted (thin or light cartoon).
+MK1 has a color clearly different from the protein, with its atoms colored by element.

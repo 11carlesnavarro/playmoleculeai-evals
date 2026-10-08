@@ -161,5 +161,14 @@ def viewer_system(uuid: str) -> Path:
     return cif
 
 
-def viewer_screenshot() -> bytes:  # PNG
+def viewer_screenshot() -> bytes:  # PNG of the viewport, as the user and the agent see it
     return _viewer("/screenshot")
+
+
+def final_image() -> Path:
+    """The viewer after the turn, kept next to the snapshot: a later rating or judge needs no viewer."""
+    png = SNAPSHOT.parent / "final-view.png"
+    if not png.exists():
+        png.parent.mkdir(parents=True, exist_ok=True)
+        png.write_bytes(viewer_screenshot())
+    return png

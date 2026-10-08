@@ -1,0 +1,21 @@
+schema_version = "1.4"
+
+[task]
+name = "acellera/vq-resistance-1m17"
+keywords = ["viewer-quality", "residues"]
+
+[metadata]
+source = "dev 3529 (follow-up)"
+
+[agent]
+timeout_sec = 1800
+
+[verifier]
+timeout_sec = 600
+
+[environment]
+docker_image = "pmai-eval:latest"
+network_mode = "public"
+cpus = 2
+memory_mb = 8192
+env = { VIEWER_PRELOAD = "" }

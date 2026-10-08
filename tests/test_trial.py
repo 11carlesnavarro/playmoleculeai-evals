@@ -131,6 +131,9 @@ def test_viewer(tmp_path, monkeypatch):
         with pytest.raises(KeyError, match="not a structure"):
             trial.viewer_system("v1")
         assert trial.viewer_screenshot() == b"PNG"
+        assert trial.final_image().read_bytes() == b"PNG"
+        routes["/screenshot"] = (200, b"later")
+        assert trial.final_image().read_bytes() == b"PNG"  # kept: a regrade sees the same image
         routes["/screenshot"] = (503, b"page crashed")
         with pytest.raises(InfraError, match="503 page crashed"):
             trial.viewer_screenshot()

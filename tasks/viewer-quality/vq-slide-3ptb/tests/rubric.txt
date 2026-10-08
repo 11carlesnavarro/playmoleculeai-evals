@@ -1,0 +1,4 @@
+Benzamidine is in the center and fully visible.
+Asp189 at the bottom of the S1 pocket shows as sticks, next to the benzamidine amidine group.
+The view is zoomed on the S1 pocket, and waters are hidden.
+The image is clean enough for a slide: few colors, no clutter.

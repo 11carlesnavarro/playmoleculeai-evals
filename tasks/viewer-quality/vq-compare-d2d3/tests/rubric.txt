@@ -1,0 +1,5 @@
+The two receptors are aligned, with their ligands in the same pocket area.
+The receptors have distinct colors, and fusion proteins (T4 lysozyme) are hidden or muted.
+The differing pocket residues show as sticks with readable labels.
+The labels do not cover each other or the ligands.
+The view is zoomed on the pocket.

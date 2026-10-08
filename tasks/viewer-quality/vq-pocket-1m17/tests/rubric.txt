@@ -1,0 +1,5 @@
+Erlotinib (AQ4) is fully visible in the pocket, not hidden behind the protein.
+The view is zoomed on the ATP pocket, not on the whole kinase.
+The hinge residue Met769, which binds the quinazoline, shows as sticks.
+Other pocket residues near the inhibitor show as sticks, and the rest of the protein is muted.
+No waters or other objects cover the inhibitor.

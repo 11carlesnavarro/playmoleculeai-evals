@@ -1,0 +1,21 @@
+schema_version = "1.4"
+
+[task]
+name = "acellera/vq-glycans-6vxx"
+keywords = ["viewer-quality", "large"]
+
+[metadata]
+source = "prod 5085"
+
+[agent]
+timeout_sec = 1800
+
+[verifier]
+timeout_sec = 600
+
+[environment]
+docker_image = "pmai-eval:latest"
+network_mode = "public"
+cpus = 2
+memory_mb = 8192
+env = { VIEWER_PRELOAD = "" }

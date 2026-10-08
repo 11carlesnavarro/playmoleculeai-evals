@@ -7,7 +7,7 @@ JOB ?= experiments/smoke.yaml
 # a new jobs/ folder per run; NAME=<an old job> resumes that job (Harbor keeps its finished trials)
 NAME ?= $(basename $(notdir $(JOB)))-$(shell date +%Y%m%d-%H%M%S)
 
-.PHONY: image viewer run view test lint
+.PHONY: image viewer run watch view test lint
 
 # sdist first, then the wheel from it: a direct wheel build reuses $(PMAI)/build/lib,
 # which keeps files deleted from src
@@ -22,6 +22,9 @@ viewer:  ## pmai-viewer:latest = headless Chromium + viewer/server.py (PMView co
 
 run:  ## make run JOB=experiments/smoke.yaml
 	set -a && . ./.env && set +a && HARBOR_TELEMETRY=off uv run harbor run -c $(JOB) --job-name $(NAME)
+
+watch:  ## follow the newest job as it runs (in a second shell); make watch JOB=jobs/<job> for another
+	uv run python scripts/watch.py $(if $(filter jobs/%,$(JOB)),$(JOB))
 
 view:
 	HARBOR_TELEMETRY=off uv run harbor view jobs

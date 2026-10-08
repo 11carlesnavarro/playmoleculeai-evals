@@ -1,0 +1,4 @@
+The pocket map shows as an isosurface on the protein, as compact pockets, not one big cloud and not empty.
+The top-scoring pocket is in the center of the view.
+The protein around the top pocket is visible (sticks or surface), not hidden behind the map.
+The map and the protein are easy to tell apart.

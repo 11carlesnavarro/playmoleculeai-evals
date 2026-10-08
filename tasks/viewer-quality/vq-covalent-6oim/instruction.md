@@ -1,0 +1,1 @@
+Use the viewer. The viewer shows KRAS G12C with sotorasib (6OIM). I need a high-quality figure of the ligand in its pocket for a paper. The covalent bond to Cys12 must be clear. Keep the background dark.

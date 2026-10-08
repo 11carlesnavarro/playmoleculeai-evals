@@ -216,6 +216,7 @@ class Browser:
         self.started = asyncio.Event()
         self.broken: str | None = None
         self.failed_url: str | None = None  # the last request that failed, for the reason
+        self.last_shot = b""
 
     def fail(self, reason: str) -> None:
         log("broken", reason=reason)
@@ -272,11 +273,15 @@ class Browser:
         await self.page.goto(SITE, wait_until="commit")  # ready means: PMView runs Python
 
     async def shoot(self, path: Path) -> None:
-        """The page after one of pmai's commands, for the trace in `make view` (trajectory.py)."""
+        """The page after one of pmai's commands, for the trace in `make view` (trajectory.py).
+        Only a changed page: most commands (state, prints, analysis) do not change the view."""
         await asyncio.sleep(1)  # PMView draws a change after the command returns
-        path.parent.mkdir(exist_ok=True)
         with contextlib.suppress(Exception):  # evidence only
-            await self.page.screenshot(path=path, type="jpeg", quality=70)
+            shot = await self.page.screenshot(type="jpeg", quality=70)
+            if shot != self.last_shot:
+                self.last_shot = shot
+                path.parent.mkdir(exist_ok=True)
+                path.write_bytes(shot)
 
     async def close(self) -> None:
         """Keep the last frame as evidence. The browser can be dead, or never started."""
@@ -372,7 +377,7 @@ async def python(request: web.Request) -> web.Response:
 
 
 async def screenshot(request: web.Request) -> web.Response:
-    output = await tool(request, "pmview_screenshot", transparent=False)
+    output = await tool(request, "pmview_screenshot", transparent=False, resolution="viewport")
     if not output.get("success"):
         raise web.HTTPBadGateway(text=f"pmview_screenshot: {output.get('error')}")
     png = base64.b64decode(output["fileContent"].split(",", 1)[-1])  # a data URI

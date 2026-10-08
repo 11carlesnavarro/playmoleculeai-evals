@@ -137,6 +137,21 @@ def test_each_result_goes_to_its_sender(tmp_path):
     assert '"event": "pmai_result", "tool": "pmview_run_python", "shot": "steps/000.jpg"' in events
 
 
+def test_shoots_only_a_changed_page(tmp_path, monkeypatch):
+    real_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda delay, result=None: real_sleep(0, result))
+    pages = iter([b"a", b"a", b"b", b"a"])
+    browser = server.Browser()
+    browser.page = SimpleNamespace(screenshot=lambda **_: real_sleep(0, next(pages)))
+
+    async def four_commands():
+        for i in range(4):
+            await browser.shoot(tmp_path / f"steps/{i:03}.jpg")
+
+    asyncio.run(four_commands())
+    assert sorted(p.name for p in (tmp_path / "steps").iterdir()) == ["000.jpg", "002.jpg", "003.jpg"]
+
+
 def test_no_pmview_is_an_infra_error(monkeypatch):
     monkeypatch.setattr(server, "CONNECT_TIMEOUT", 0.1)
 

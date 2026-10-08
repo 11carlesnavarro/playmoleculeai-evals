@@ -1,0 +1,1 @@
+Use the viewer. 7Y5K_prepared.pdb is my protein, and output.cube, output.pdb and output.csv are the output of a DeepSite pocket prediction on it. Show the pocket map on the protein and make the top pocket clear.

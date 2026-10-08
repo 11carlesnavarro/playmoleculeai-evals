@@ -1,0 +1,5 @@
+The interface between HER2 and the Fab is in the center and zoomed.
+Contact residues on both sides show as sticks.
+HER2 and the Fab have distinct colors.
+The contacts are readable (dashed lines or labels), not a pile of atoms.
+Glycans and waters do not cover the interface.

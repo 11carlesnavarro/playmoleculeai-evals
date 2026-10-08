@@ -1,0 +1,21 @@
+schema_version = "1.4"
+
+[task]
+name = "acellera/vq-active-site-1ca2"
+keywords = ["viewer-quality", "residues", "holdout"]
+
+[metadata]
+source = "open 6427, 6424 (Spanish)"
+
+[agent]
+timeout_sec = 1800
+
+[verifier]
+timeout_sec = 600
+
+[environment]
+docker_image = "pmai-eval:latest"
+network_mode = "public"
+cpus = 2
+memory_mb = 8192
+env = { VIEWER_PRELOAD = "" }

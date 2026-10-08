@@ -1,0 +1,21 @@
+schema_version = "1.4"
+
+[task]
+name = "acellera/vq-covalent-6oim"
+keywords = ["viewer-quality", "figure"]
+
+[metadata]
+source = "prod 3229, 3240, 3243"
+
+[agent]
+timeout_sec = 1800
+
+[verifier]
+timeout_sec = 600
+
+[environment]
+docker_image = "pmai-eval:latest"
+network_mode = "public"
+cpus = 2
+memory_mb = 8192
+env = { VIEWER_PRELOAD = "{\"pdb_ids\": [\"6OIM\"]}" }

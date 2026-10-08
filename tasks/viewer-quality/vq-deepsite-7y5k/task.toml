@@ -1,0 +1,20 @@
+schema_version = "1.4"
+
+[task]
+name = "acellera/vq-deepsite-7y5k"
+keywords = ["viewer-quality", "volume"]
+
+[metadata]
+source = "prod 6166, open 3736"
+
+[agent]
+timeout_sec = 1800
+
+[verifier]
+timeout_sec = 600
+
+[environment]
+network_mode = "public"
+cpus = 2
+memory_mb = 8192
+env = { VIEWER_PRELOAD = "" }
