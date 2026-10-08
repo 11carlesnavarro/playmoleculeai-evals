@@ -18,6 +18,9 @@ DB = LOGS / "home" / "agent.db"
 _work = LOGS / "work_dir"
 WORK = Path(_work.read_text().strip()) if _work.exists() else Path("/app")
 VIEWER = os.environ.get("VIEWER_URL")  # viewer tasks only: viewer/compose.yaml sets it
+# /logs/artifacts: Harbor keeps it on the host at <trial>/artifacts/logs/artifacts
+ARTIFACTS = LOGS.parent / ("artifacts" if Path("/logs/agent") == LOGS else "artifacts/logs/artifacts")
+SNAPSHOT = ARTIFACTS / "viewer" / "snapshot"  # next to the sidecar's evidence
 
 
 @cache
@@ -91,7 +94,7 @@ def _viewer(path: str, data: bytes | None = None) -> bytes:
     """The viewer sidecar's control API (viewer/server.py). A sidecar that cannot answer is an infra
     error: the trial gets no reward, not a 0."""
     if not VIEWER:
-        raise InfraError("no viewer: the job must add viewer/compose.yaml")
+        raise InfraError("no viewer: the task needs environment/docker-compose.yaml -> viewer/compose.yaml")
     try:
         with urllib.request.urlopen(VIEWER + path, data, timeout=300) as r:
             return r.read()
@@ -116,18 +119,46 @@ def _pmv(value: str, before: str = ""):
         raise RuntimeError(f"viewer python: {out.get('stderr') or out.get('error')}") from None
 
 
+def _snapshot() -> Path:
+    """The viewer after the turn, read once through the agent's API and kept in the trial's artifacts.
+    The tests read this copy, so a later grade on the host (TRIAL_LOGS) needs no viewer. viewer_python
+    still runs on the live viewer."""
+    systems = SNAPSHOT / "systems"
+    if not (SNAPSHOT / "state.json").exists():  # written last: the snapshot is complete
+        state = _pmv("pmv.get_viewer_state()")
+        no_selection = "try:\n    s = pmv.get_viewer_selection()\nexcept TypeError:\n    s = None"
+        selection = _pmv("dict(s or {})", no_selection)
+        systems.mkdir(parents=True, exist_ok=True)
+        for d in (SNAPSHOT, systems):  # on NFS root is nobody here: the host user must still delete the files
+            d.chmod(0o777)
+        for uuid, system in state["systems"].items():
+            if system.get("type") != "structure":  # a volume: get_system cannot give it
+                continue
+            try:  # mmCIF: in PMView's Python the PDB writer needs networkx
+                cif = _pmv("open('/tmp/eval.cif').read()", f"pmv.get_system({uuid!r}).write('/tmp/eval.cif')")
+                (systems / f"{uuid}.cif").write_text(cif)
+            except RuntimeError as error:  # one bad system: the checks that need it fail, not all
+                (systems / f"{uuid}.error").write_text(str(error))
+        (SNAPSHOT / "selection.json").write_text(json.dumps(selection))
+        (SNAPSHOT / "state.json").write_text(json.dumps(state))
+    return SNAPSHOT
+
+
 def viewer_state() -> dict:  # {"systems", "tables", "plots", "files"}
-    return _pmv("pmv.get_viewer_state()")
+    return json.loads((_snapshot() / "state.json").read_text())
 
 
-def viewer_selection() -> dict:
-    # TypeError: no selection yet
-    return _pmv("dict(s or {})", "try:\n    s = pmv.get_viewer_selection()\nexcept TypeError:\n    s = None")
+def viewer_selection() -> dict:  # {uuid: atom selection}; before the first selection PMView raises TypeError
+    return json.loads((_snapshot() / "selection.json").read_text())
 
 
-def viewer_system(uuid: str) -> str:
-    """A system in the viewer, as PDB text."""
-    return _pmv("open('/tmp/eval.pdb').read()", f"pmv.get_system({uuid!r}).write('/tmp/eval.pdb')")
+def viewer_system(uuid: str) -> Path:
+    """A structure in the viewer, as an mmCIF file. KeyError when the viewer could not give it."""
+    cif = _snapshot() / "systems" / f"{uuid}.cif"
+    if not cif.exists():
+        error = cif.with_suffix(".error")
+        raise KeyError(f"system {uuid}: {error.read_text() if error.exists() else 'not a structure'}")
+    return cif
 
 
 def viewer_screenshot() -> bytes:  # PNG

@@ -25,7 +25,7 @@ playmoleculeai-evals/
 ├── viewer/                       phase 5
 │   ├── Dockerfile                pmai-viewer: Chromium + server (PMView comes from the site)
 │   ├── server.py                 opens the PMView site; takes its agent socket and project files + control API
-│   └── compose.yaml              the sidecar service: a viewer job adds it as extra_docker_compose
+│   └── compose.yaml              the sidecar service: each viewer task has a copy (environment/docker-compose.yaml)
 ├── config/<name>/agent_config.yaml   pmai configs, baked at /opt/pmai-config
 ├── src/pmai_evals/
 │   ├── agent.py                  Harbor agent (host side)
@@ -53,7 +53,7 @@ playmoleculeai-evals/
   the `.env` OpenAI key is archived (401), and then `populate_context_post_run` crashed on the read only `agent.db`, which stopped the trial before the verifier. Both causes are known; the crash is fixed. Run the smoke job again with a working key.
 - Phase 3: done. `sa-models` and `skills-ab` ran in Docker (results in the phase 3 section). The image now has the skills (it had none before).
 - Phase 4: done. The eval account is `carles` (the user's account, `PM_EMAIL` in `.env`); `scripts/eval_account.py check` logs in on the dev backend.
-- Phase 5: `pmai run --viewer-id` is in playmoleculeAI. The sidecar opens the deployed PMView site; the image, the compose file, the agent script change and the `trial.py` viewer functions are done, with unit tests. The 5.8 try passed on computer19 against production, with one pmai turn (2026-10-07). Next: 5.7, a Harbor run with the viewer.
+- Phase 5: `pmai run --viewer-id` is in playmoleculeAI. The sidecar opens the deployed PMView site; the image, the compose file, the agent script change and the `trial.py` viewer functions are done, with unit tests. The 5.8 try passed on computer19 against production, with one pmai turn (2026-10-07). 5.7: molecular-visualization is ported (10 tasks, preload, field adapter); the grading path passed against production with no model. `experiments/viewer.yaml` on Harbor (2026-10-08): mv-1jpz, mv-2ity and mv-7fab all reward 1.0, about $0.003 a turn. 5.9: the trace in `make view`. Next: the full set (10 tasks).
 - The old harness is removed. All of it is in `/fast_shared/users/carles/data/playmoleculeAIdata/evals-archive-2026-10-05/`:
   - `repo-before-cleanup.tar.gz`: the repo before the cleanup (old src, tests, scripts, mining, development, docs, playwright). Not in it: `.env`, `playwright/.auth`, `.venv`, `.git`, bixbench fixtures.
   - `runs/`: the old run results (34 GB), the baseline for phase 2.
@@ -304,7 +304,7 @@ In playmoleculeAI `cli.py` (d5a3f3fb, pushed by the user). `pmai run --viewer-id
 
 ### 5.2 `viewer/server.py` and `tests/test_viewer_server.py` (done)
 
-The files are the reference. Environment: `PMVIEW_URL`, `PM_EMAIL`, `PM_PASSWORD`, `AGENT_WS` (default `ws://main:8100/v1/ws/eval`), `FILES_ROOT`, `EVIDENCE_DIR`, `READY_TIMEOUT`.
+The files are the reference. Environment: `PMVIEW_URL`, `PM_EMAIL`, `PM_PASSWORD`, `AGENT_WS` (compose sets `ws://main:8100/v1/ws/eval`; the default `ws://localhost:8100/v1/ws/eval` is for 5.8), `VIEWER_PRELOAD` (JSON `{"pdb_ids", "files"}`), `FILES_ROOT`, `EVIDENCE_DIR`, `READY_TIMEOUT`.
 
 Control API on `:9000`:
 
@@ -334,18 +334,14 @@ Not checked yet: a Harbor trial with `viewer/compose.yaml`.
 
 ### 5.4 `viewer/compose.yaml` (written)
 
-A viewer job adds the file:
-
-```yaml
-environment:
-  extra_docker_compose: [viewer/compose.yaml]
-```
+Each viewer task has `environment/docker-compose.yaml`, a copy of `viewer/compose.yaml` (`cases_to_tasks.py` writes it; `tests/test_tasks.py` fails when a copy is old). Not a link: Harbor refuses a link out of the task for a git dataset, and its environment hash skips links. Harbor adds a task's compose file to the trial, so a viewer task always gets its viewer, and other tasks in the same job start no browser. The job file needs nothing.
 
 - Harbor runs compose with the process env, so `${PM*}` come from `.env` (`make run` exports it) `[checked]`. Harbor sets `HOST_ARTIFACTS_PATH` from its own `/logs/artifacts` mount `[checked]`.
-- `main` gets `VIEWER_URL=http://viewer:9000` and starts only when the viewer is healthy.
+- `main` gets `VIEWER_URL=http://viewer:9000` and starts only when the viewer is healthy. The viewer gets `AGENT_WS=ws://main:8100/v1/ws/eval`: 8100 is `port` in the pmai config. Not `AGENT_PORT`: it moves only the port that pmai listens on, and the tools still call back on the config port (playmoleculeAI `core/installation.py:12`). A fix in pmai can use one port for both.
+- A task's `[environment] env` goes to compose: `VIEWER_PRELOAD`, for example `{"pdb_ids": ["1JPZ"], "files": ["pseudo_oxo.pdb"]}`, goes to the viewer. Each viewer task sets it, empty when there is no preload, so a value in `.env` cannot get in. After ready, `/open` loads them as the agent does: each PDB id with `Molecule(id).view()`, the files with `pmview_load`. A failed load is a 503, and all of `/open` stays within `READY_TIMEOUT`.
 - The project is a named volume: `/app` in `main`, `/files/app` in `viewer`. Docker fills it from the image's `/app` on first use. Harbor's `down --volumes` removes it.
 - The viewer container needs internet: the site and the CDNs.
-- The sidecar writes `viewer/events.jsonl` and `viewer/final.png` straight to the trial's artifacts folder. Harbor collects sidecar artifacts before the verifier, which is too early for `final.png` `[checked]`. `os.umask(0)` in `server.py`: on NFS the files belong to nobody, and the host user must still delete them.
+- The sidecar writes `viewer/events.jsonl` and `viewer/final.png` straight to the trial's artifacts folder (on the host: `<trial>/artifacts/logs/artifacts/viewer/`) `[checked]`. Harbor collects sidecar artifacts before the verifier, which is too early for `final.png` `[checked]`. `os.umask(0)` in `server.py`: on NFS the files belong to nobody, and the host user must still delete them.
 
 ### 5.5 `agent.py`: stop on 503 (written)
 
@@ -353,11 +349,13 @@ The script opens the viewer only when `VIEWER_URL` is set: other tasks run as be
 
 ### 5.6 `trial.py`: the viewer through the agent's API (written)
 
+The first viewer read saves a snapshot of the viewer after the turn in `/logs/artifacts/viewer/snapshot/` (on the host: `<trial>/artifacts/logs/artifacts/viewer/snapshot/`): `state.json`, `selection.json` and `systems/<uuid>.cif` for each structure. The tests read the snapshot, so a later grade on the host (`TRIAL_LOGS=...`) needs no viewer `[checked]`. `viewer_python` and `viewer_screenshot` still use the live viewer. A system that PMView cannot write gives `systems/<uuid>.error`: only the checks that need it fail.
+
 | Old check reads | New, in `trial.py` | Through |
 |---|---|---|
-| `artifact.viewer_state()` | `viewer_state()` | `pmv.get_viewer_state()` |
-| `artifact.viewer_selection()` | `viewer_selection()` | `pmv.get_viewer_selection()`. Before the first selection it raises `TypeError`: return `{}`. |
-| `artifact.load_system(name)` | `viewer_system(uuid)` | `pmv.get_system(uuid)`, written as PDB text |
+| `artifact.viewer_state()` | `viewer_state()` | `pmv.get_viewer_state()`, from the snapshot |
+| `artifact.viewer_selection()` | `viewer_selection()` | `pmv.get_viewer_selection()`, from the snapshot. Before the first selection it raises `TypeError`: `{}`. |
+| `artifact.load_system(name)` | `viewer_system(uuid)`: the path of the mmCIF file | `pmv.get_system(uuid)`, written as mmCIF (the PDB writer needs networkx, which Pyodide does not have) `[checked]`. 3 systems with 5TBY (2.2 MB): 5.9 s. |
 | final screenshot | `viewer_screenshot()` | `GET /screenshot` |
 | | `viewer_python(code)` | `POST /python`: `{stdout, stderr, result}` |
 
@@ -377,21 +375,23 @@ The old checks read other field names. An adapter in `legacy.py` maps them:
 | `moleculeID` | the key of `systems` |
 | `type` | `style` |
 | `selection` | `sel` |
-| `color_value` (int) | `color` (`"#rrggbb"`) |
-| top level nodes | leaf systems |
+| `color_value` (int, or none for a scheme) | `color`: `"#rrggbb"` (PMView stores `blue` as `#0000ff`) or a scheme name (`element-symbol`) `[checked]`. The adapter gives the string as it is (the checks parse it) or none. |
+| a list of systems | a dict of systems by uuid. The adapter gives the structures only (no volumes), the newest first: the checks take the first match, and that is then the agent's own copy, not a preloaded one. A name that is `None` gives `""`. |
+| a rep of a hidden system | `visible: false` on the system: the adapter makes its reps not visible |
+| `load_system(name)`, `system_files()` from the export zip | the systems in the viewer by name without the extension, through `pmv.get_system(uuid)` as mmCIF |
 
 ```bash
 uv run python scripts/cases_to_tasks.py eval_sets/acellera-bench/molecular-visualization tasks/molecular-visualization
-make viewer && make run JOB=experiments/viewer.yaml
+make image viewer   # both changed: legacy.py and trial.py are in pmai-eval, server.py in pmai-viewer
+make run JOB=experiments/viewer.yaml
 ```
 
-`experiments/viewer.yaml`: 3 tasks, gpt-6-luna, 1 attempt, less than $0.05. The full set only after that sample passes.
+`experiments/viewer.yaml`: mv-1jpz (a preload and a viewer selection), mv-2ity (colors and styles), mv-7fab (a selection). gpt-6-luna, 1 attempt, less than $0.05. The full set only after that sample passes.
 
-Open points from the phase 5 review (2026-10-07), to decide in this step:
-- `legacy.check` gives 0 for every exception. When `RunArtifact` gets the viewer methods, it must raise `InfraError` again, else an infra error becomes a 0.
-- The job adds `viewer/compose.yaml`. Harbor also merges a task's own `environment/docker-compose.yaml`: a viewer task could carry the file, and then a job with no viewer cannot run it.
-- The pmai socket (port 8100, id `eval`) is in `config/*/agent_config.yaml`, `agent.py` and `server.py`. A new config with no `port: 8100` breaks viewer tasks.
-- A failed `/open` is a `NonZeroAgentExitCodeError`, as a pmai crash. Harbor retries agent errors by default. Harbor's `ERROR_PATTERNS` can give it its own type.
+- The old cases preloaded `pdb_ids` and `files` in the viewer: now `VIEWER_PRELOAD` (mv-1ca2, mv-1jpz). The files also go to the project, as before.
+- `legacy.check` raises `InfraError` again: an infra error gives no reward, not a 0.
+- Checked on ws12 against production, with no model (2026-10-07): the preload of 1JPZ and `pseudo_oxo.pdb` loaded both (names `1jpz` and `pseudo_oxo.pdb`); the mv-1jpz selection made through `/python`; then the ported check through `legacy.py` and `trial.py` gave 1.0, and 1.0 again from the snapshot with no viewer `[checked]`.
+- The old checks find a system by its name without the extension. An agent that loads `1CA2_assembly1.pdb` for "1CA2" fails them, as in the old harness.
 
 ### 5.8 Try the sidecar without Harbor
 
@@ -402,7 +402,6 @@ make viewer
 mkdir -p /tmp/t1/app /tmp/t1/home /tmp/t1/artifacts && cp config/default/agent_config.yaml /tmp/t1/home/
 # host network: on computer19 a -p port mapping connects but never answers (2026-10-07)
 docker run --rm --name pmai-viewer-try --network host --env-file .env \
-  -e AGENT_WS=ws://localhost:8100/v1/ws/eval \
   -v /tmp/t1:/files -v /tmp/t1/artifacts:/logs/artifacts pmai-viewer:latest
 # second shell
 curl "localhost:9000/open?project=app"   # "ready", else 503 with the reason
@@ -415,6 +414,14 @@ curl -o /tmp/t1/shot.png localhost:9000/screenshot
 ```
 
 `/tmp/t1/artifacts/viewer/events.jsonl` has the sidecar events. `-e PMVIEW_URL=...` opens another site.
+
+### 5.9 The trace in `make view` (written)
+
+`make view` shows the steps of a trial only from `agent/trajectory.json` (Harbor's ATIF format). `src/pmai_evals/trajectory.py` writes it from `agent.db`; `agent.py` calls it after each turn, for all tasks. Each step has the model's text, its reasoning summary, each tool call with its arguments (for example the Python of `pmview_run_python`), the output, and the images (files in `agent/images/`; ATIF wants a path). Only the main chat: a subagent's steps stay in `agent.db`.
+
+Viewer tasks: after each of pmai's commands, the sidecar logs `pmai_result` (before pmai gets the result) and 1 s later saves a JPEG of the page in `viewer/steps/`. The step of that command shows it: a result comes back before pmai saves its response in `agent.db`, so the screenshot goes to the first response saved after it.
+
+For trials that are done: `uv run python -m pmai_evals.trajectory jobs/<job>/<trial> ...`. The 3 trials of the first `experiments/viewer.yaml` run (2026-10-08, all reward 1.0) have it, without the sidecar screenshots (the sidecar took none then). The running `make view` served the trace and its images `[checked]`.
 
 **Done when:** molecular-visualization passes on Harbor at the old harness rate, and nobody opens a browser.
 

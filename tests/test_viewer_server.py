@@ -107,6 +107,8 @@ def test_each_result_goes_to_its_sender(tmp_path):
     async def scenario():
         async with sidecar() as s:
             s.viewer.connect(FakePMView())
+            shots = []
+            s.viewer.shoot = lambda path: asyncio.sleep(0, shots.append(path))  # after pmai's commands
             got, exited = asyncio.Queue(), asyncio.Event()
             pmai = TestServer(fake_pmai(got, exited))
             await pmai.start_server()
@@ -120,6 +122,7 @@ def test_each_result_goes_to_its_sender(tmp_path):
             r = await s.control.post("/python", data="during the turn")
             assert await r.json() == {"stdout": "ran during the turn"}
             assert got.empty()  # the tests' result does not go to pmai
+            assert shots == [tmp_path / "steps/000.jpg"]  # pmai's command only
 
             exited.set()  # pmai exits; the sidecar keeps PMView
             await until(lambda: s.viewer.agent is None)
@@ -129,7 +132,9 @@ def test_each_result_goes_to_its_sender(tmp_path):
             await pmai.close()
 
     asyncio.run(scenario())
-    assert "secret" not in (tmp_path / "events.jsonl").read_text()
+    events = (tmp_path / "events.jsonl").read_text()
+    assert "secret" not in events
+    assert '"event": "pmai_result", "tool": "pmview_run_python", "shot": "steps/000.jpg"' in events
 
 
 def test_no_pmview_is_an_infra_error(monkeypatch):
@@ -149,6 +154,31 @@ def test_no_pmview_is_an_infra_error(monkeypatch):
             assert (r.status, await r.text()) == (503, "no WebGL2: Mol* cannot draw")
 
     asyncio.run(scenario())
+
+
+def test_preload(monkeypatch):
+    monkeypatch.setattr(server, "PRELOAD", {"pdb_ids": ["1JPZ"], "files": ["pseudo_oxo.pdb"]})
+
+    async def scenario(stdout):
+        async with sidecar() as s:
+            s.viewer.connect(pmview := FakePMView())
+
+            def answer(raw):  # as PMView answers: the code's output, not the code
+                pmview.seen.append(message := json.loads(raw))
+                output = {"stdout": stdout} if "code" in message["arguments"] else {"success": True}
+                reply = json.dumps({**RESULT, "command_id": message["command_id"], "output": output})
+                asyncio.get_running_loop().call_soon(pmview.answer, reply)
+
+            pmview.send = answer
+            await server.preload(s.viewer)
+            return [(m["tool_name"], m["arguments"]) for m in pmview.seen]
+
+    assert asyncio.run(scenario("Downloading 1JPZ\nloaded\n")) == [
+        ("pmview_run_python", {"code": "Molecule('1JPZ').view()\nprint('loaded')"}),
+        ("pmview_load", {"files": ["pseudo_oxo.pdb"], "overwrite": True}),
+    ]
+    with pytest.raises(server.Unavailable, match="preload 1JPZ"):  # Molecule failed: no "loaded" line
+        asyncio.run(scenario(""))
 
 
 class FakeRoute:

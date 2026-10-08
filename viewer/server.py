@@ -6,6 +6,7 @@ code. Playwright takes only two things away from the site:
 - the trial project's files (/v3/file/<project>/...): the shared project folder, not the site's bucket.
 
 :9000  control, for the agent script and the tests: /healthz, /open?project=P, POST /python, /screenshot.
+/open also loads the task's structures (VIEWER_PRELOAD), as the agent loads them.
 
 The sidecar owns PMView's agent socket for the whole trial. During `pmai run` it passes pmai's viewer
 commands through; before and after, the tests send their own. A browser problem is an infra error
@@ -28,7 +29,9 @@ import aiohttp
 from aiohttp import web
 
 SITE = (os.environ.get("PMVIEW_URL") or "https://acellera.playmolecule.ai").rstrip("/")  # empty: default
-AGENT_WS = os.environ.get("AGENT_WS", "ws://main:8100/v1/ws/eval")  # pmai run --viewer-id eval
+# pmai run --viewer-id eval. compose.yaml sets it for a trial; the default is for a hand run (plan 5.8)
+AGENT_WS = os.environ.get("AGENT_WS", "ws://localhost:8100/v1/ws/eval")
+PRELOAD = json.loads(os.environ.get("VIEWER_PRELOAD") or "{}")  # the task's start: {"pdb_ids", "files"}
 FILES = Path(os.environ.get("FILES_ROOT", "/files"))  # <project>/<path>, as in a backend bucket
 EVIDENCE = Path(os.environ.get("EVIDENCE_DIR", "/logs/artifacts/viewer"))
 READY_TIMEOUT = float(os.environ.get("READY_TIMEOUT", 300))  # SwiftShader, Pyodide from CDNs: slow
@@ -74,6 +77,9 @@ class Viewer:
         self.inbox: asyncio.Queue = asyncio.Queue()  # PMView's messages, from all its sockets
         self.agent: aiohttp.ClientWebSocketResponse | None = None  # pmai, during `pmai run`
         self.waiting: dict[str, asyncio.Future] = {}  # our own commands
+        self.tools: dict[str, str] = {}  # pmai's commands: command_id -> tool name
+        self.shoot = None  # Browser.shoot: the page after each of pmai's commands (main sets it)
+        self.shots: list[asyncio.Task] = []
 
     def connect(self, ws) -> None:
         """Playwright gives us each socket that PMView opens. Nothing goes to the site's agent.
@@ -114,8 +120,13 @@ class Viewer:
                 if not answer.done():
                     answer.set_result(message)
             elif self.agent is not None:
+                # logged before pmai gets it, so before agent.db has the step: trajectory.py needs the order
+                shot = f"steps/{len(self.shots):03}.jpg"
+                log("pmai_result", tool=self.tools.pop(message.get("command_id"), None), shot=shot)
                 with contextlib.suppress(ConnectionError):  # pmai exits: its command is gone with it
                     await self.agent.send_json(message)
+                if self.shoot:
+                    self.shots.append(asyncio.create_task(self.shoot(EVIDENCE / shot)))
 
 
 async def keepalive(viewer: Viewer) -> None:
@@ -151,6 +162,8 @@ async def from_pmai(viewer: Viewer, agent: aiohttp.ClientWebSocketResponse, mess
     if message.get("type") == "ping":
         await agent.send_json({"type": "pong"})
         return
+    if message.get("type") == "pmview_command":
+        viewer.tools[message.get("command_id")] = message.get("tool_name")
     try:
         await viewer.send(message)  # commands, and the job messages that PMView shows
     except TimeoutError:
@@ -258,6 +271,13 @@ class Browser:
         await self.context.add_cookies([{"name": "PM_PROJECT", "value": project, "url": SITE}])
         await self.page.goto(SITE, wait_until="commit")  # ready means: PMView runs Python
 
+    async def shoot(self, path: Path) -> None:
+        """The page after one of pmai's commands, for the trace in `make view` (trajectory.py)."""
+        await asyncio.sleep(1)  # PMView draws a change after the command returns
+        path.parent.mkdir(exist_ok=True)
+        with contextlib.suppress(Exception):  # evidence only
+            await self.page.screenshot(path=path, type="jpeg", quality=70)
+
     async def close(self) -> None:
         """Keep the last frame as evidence. The browser can be dead, or never started."""
         with contextlib.suppress(Exception):
@@ -286,6 +306,20 @@ async def until_ready(viewer: Viewer, browser: Browser, deadline: float) -> None
     raise Unavailable(f"not ready after {READY_TIMEOUT:.0f} s: {why}{last}")
 
 
+async def preload(viewer: Viewer) -> None:
+    """As the agent loads them: a PDB id with Molecule (the pmview skill's way), files with pmview_load."""
+    for pdb in PRELOAD.get("pdb_ids", []):
+        output = await viewer.call("pmview_run_python", code=f"Molecule({pdb!r}).view()\nprint('loaded')")
+        if (output.get("stdout") or "").split()[-1:] != ["loaded"]:  # other output can come first
+            raise Unavailable(f"preload {pdb}: {output}")
+        log("preloaded", pdb=pdb)
+    if files := PRELOAD.get("files"):
+        output = await viewer.call("pmview_load", files=files, overwrite=True)
+        if not output.get("success"):
+            raise Unavailable(f"preload {files}: {output}")
+        log("preloaded", files=files)
+
+
 async def healthz(request: web.Request) -> web.Response:
     """200 once the browser has started, or failed to: then compose starts the agent container."""
     browser = request.app[BROWSER]
@@ -306,7 +340,11 @@ async def open_project(request: web.Request) -> web.Response:
         if browser.broken:
             raise Unavailable(browser.broken)
         await browser.open(project)
-        await until_ready(viewer, browser, start + READY_TIMEOUT)
+        await until_ready(viewer, browser, deadline := start + READY_TIMEOUT)
+        try:  # within READY_TIMEOUT too: the agent script waits 600 s for all of /open
+            await asyncio.wait_for(preload(viewer), deadline - time.monotonic())
+        except TimeoutError:
+            raise Unavailable(f"preload not done after {READY_TIMEOUT:.0f} s") from None
         scripts = await browser.page.evaluate(SCRIPTS)
     except Exception as error:
         browser.fail(str(error) or repr(error))  # the tests then get a 503 too, not a viewer with no project
@@ -363,6 +401,7 @@ async def main() -> None:
     os.umask(0)  # root here can be nobody on the host (NFS): the host user must still delete the evidence
     EVIDENCE.mkdir(parents=True, exist_ok=True)
     viewer, browser = Viewer(), Browser()
+    viewer.shoot = browser.shoot
     stop = asyncio.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):  # docker compose down: keep the evidence first
         asyncio.get_running_loop().add_signal_handler(sig, stop.set)

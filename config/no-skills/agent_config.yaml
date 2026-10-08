@@ -1,7 +1,7 @@
 # config/default without the skills plugin: the agent sees no skills.
 # No db_path: agent.db goes in the config folder (/logs/agent/home), which Harbor syncs to the host.
 config_version: 1          # without it pmai rewrites the file on start
-port: 8100                 # pmai run --viewer-id listens here (phase 5)
+port: 8100                 # pmai run --viewer-id listens here: AGENT_WS in viewer/compose.yaml
 reasoning:
   summary: auto
   effort: xhigh

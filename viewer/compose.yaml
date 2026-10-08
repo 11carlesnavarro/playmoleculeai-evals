@@ -1,6 +1,7 @@
-# Viewer tasks: a job adds this file with `environment: {extra_docker_compose: [viewer/compose.yaml]}`.
-# Harbor runs compose with its own env, so ${PM*} come from .env (make run) and HOST_ARTIFACTS_PATH
-# is the trial's artifacts folder.
+# Viewer tasks: environment/docker-compose.yaml is a copy of this file (scripts/cases_to_tasks.py;
+# tests/test_tasks.py checks the copies), and Harbor adds it to the trial. Harbor runs compose with its
+# own env, so ${PM*} come from .env (make run), VIEWER_PRELOAD from the task's [environment] env, and
+# HOST_ARTIFACTS_PATH is the trial's artifacts folder.
 services:
   main:
     environment:
@@ -14,6 +15,8 @@ services:
       PMVIEW_URL:  # the site that serves PMView; not set: the default in server.py
       PM_EMAIL: ${PM_EMAIL:?set it in .env}
       PM_PASSWORD: ${PM_PASSWORD:?set it in .env}
+      AGENT_WS: ws://main:8100/v1/ws/eval  # port: the pmai config (config/*), id: --viewer-id in agent.py
+      VIEWER_PRELOAD: ${VIEWER_PRELOAD:-}  # {"pdb_ids": [...], "files": [...]} in the viewer before the turn
     volumes:
       - project:/files/app
       - ${HOST_ARTIFACTS_PATH:?Harbor sets it}:/logs/artifacts  # events.jsonl and final.png

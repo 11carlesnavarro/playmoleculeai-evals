@@ -8,7 +8,7 @@ from harbor.agents.installed.base import BaseInstalledAgent, with_prompt_templat
 from harbor.agents.options import InstalledAgentOptions
 from pydantic import Field
 
-from pmai_evals import trial
+from pmai_evals import trajectory, trial
 
 HOME = "/logs/agent/home"  # pmai config home: agent_config.yaml + agent.db, synced to the host
 # Viewer tasks only (viewer/compose.yaml sets VIEWER_URL): the sidecar opens PMView on this project.
@@ -95,3 +95,8 @@ pmai run $FLAGS --config {HOME} {model_flag} --output json \\
             context.n_cache_tokens = u["cached_tokens"]
             context.n_output_tokens = u["output_tokens"]
             context.cost_usd = u["cost_usd"]
+            info = self.to_agent_info()
+            try:  # agent/trajectory.json: the steps in `make view`
+                trajectory.write(self.logs_dir, info.name, info.version, self.model_name)
+            except Exception as exc:  # a view only: never stop the trial
+                self.logger.warning(f"no trajectory: {exc!r}")

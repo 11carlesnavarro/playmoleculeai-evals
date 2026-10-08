@@ -6,6 +6,7 @@ Evals for PlayMoleculeAI. [Harbor](https://github.com/laude-institute/harbor) st
 harbor run ──► trial container (pmai-eval image)
                  ├─ pmai run --prompt "<instruction.md>"   tools run here, local backend
                  ├─ /logs/agent/home/agent.db              trace, production schema
+                 │    └► agent/trajectory.json (host)      the trace in make view (trajectory.py)
                  └─ /tests/test.sh ──► pytest ──► /logs/verifier/reward.json
 ```
 
@@ -25,7 +26,7 @@ uv run python scripts/compare_old.py jobs/<job>   # old harness vs new, per case
 ```text
 image/Dockerfile                  sandbox image + pmai (/opt/pmai) + grader (/opt/grader) + skills
 viewer/                           viewer tasks: the PMView site in headless Chromium, next to the trial container
-                                  (Dockerfile, server.py, compose.yaml: a job adds it as extra_docker_compose)
+                                  (Dockerfile, server.py, compose.yaml: each viewer task has a copy)
 config/<name>/agent_config.yaml   pmai configs, baked at /opt/pmai-config
 src/pmai_evals/agent.py           the Harbor agent (host side)
 src/pmai_evals/trial.py           what a test asks about a trial: answer, tool calls, cost, viewer
@@ -79,3 +80,5 @@ echo /tmp/t/app > /tmp/t/logs/work_dir
 TRIAL_LOGS=/tmp/t/logs REWARD_JSON=/tmp/t/reward.json \
   uv run pytest tasks/smoke/hello-file/tests -q -p pmai_evals.reward && cat /tmp/t/reward.json
 ```
+
+To grade a Harbor trial again, set `TRIAL_LOGS=<trial>/agent`. A viewer task then reads the viewer snapshot in `<trial>/artifacts/logs/artifacts/viewer/snapshot/` and needs no viewer (old checks also need `uv run --with "moleculekit<1.12"`).

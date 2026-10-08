@@ -1,0 +1,10 @@
+[
+  {
+    "function": "mv1ca2_alignment",
+    "kwargs": {}
+  },
+  {
+    "function": "mv1ca2_diff_residues_highlighted",
+    "kwargs": {}
+  }
+]

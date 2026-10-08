@@ -1,0 +1,755 @@
+"""Programmatic checks for the molecular-visualization eval set.
+
+One function per case-assertion, grouped by case id. Expected answers and
+thresholds are baked into the function. Re-derive any hardcoded constants
+with the matching ``development/test_case_<N>.py`` script if source data
+changes.
+"""
+
+from __future__ import annotations
+
+import itertools
+import re
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+from pmai_evals.legacy import AssertionConfigError
+from pmai_evals.legacy import PYTHON_CHECK_TYPE
+from pmai_evals.legacy import RunArtifact
+from pmai_evals.legacy import AssertionResult
+
+
+# ---- shared helpers --------------------------------------------------------
+
+_BLUE = 0x0000FF
+_YELLOW = 0xFFFF00
+_RED = 0xFF0000
+_STICK_TYPES = ("ball-and-stick", "licorice", "sticks", "stick")
+_ANSWER_RE = re.compile(
+    r"<answer>\s*(-?\d+(?:\.\d+)?)\s*</answer>", re.IGNORECASE
+)
+
+
+def _parse_numeric_answer(artifact: RunArtifact) -> float | None:
+    """Extract the float from a ``<answer>X.XX</answer>`` tag, or ``None``."""
+    match = _ANSWER_RE.search(artifact.final_answer())
+    return float(match.group(1)) if match else None
+
+
+def _result(score: float | bool, evidence: str) -> AssertionResult:
+    return AssertionResult(
+        assertion_type=PYTHON_CHECK_TYPE,
+        score=float(score),
+        evidence=evidence,
+        config={},
+    )
+
+
+def _find_system(state: Any, name: str) -> dict[str, Any] | None:
+    """Top-level system whose stem matches ``name`` case-insensitively.
+
+    Local-file loads carry the file extension in their viewer-state name
+    (``pseudo_oxo.pdb``); PDB-id loads do not. Stripping with ``Path.stem``
+    on both sides lets call sites pass either form.
+    """
+    if not isinstance(state, list):
+        return None
+    needle = Path(name).stem.lower()
+    for entry in state:
+        if (
+            isinstance(entry, dict)
+            and Path(str(entry.get("name", ""))).stem.lower() == needle
+        ):
+            return entry
+    return None
+
+
+def _normalize_color(value: Any) -> int | None:
+    """Coerce ``#RRGGBB`` / integer / ``None`` into an int, or ``None``."""
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lstrip("#")
+        if not text:
+            return None
+        try:
+            return int(text, 16)
+        except ValueError as exc:
+            raise AssertionConfigError(f"invalid color {value!r}") from exc
+    raise AssertionConfigError(f"color must be hex string or int, got {type(value).__name__}")
+
+
+def _chain_residues(
+    hits: set[tuple[str, int]], chain: str = "A"
+) -> set[int]:
+    """Resids in ``hits`` whose chain matches ``chain`` (case-insensitive)."""
+    target = chain.upper()
+    return {r for c, r in hits if c.upper() == target}
+
+
+def _selected_atom_mask(
+    viewer_state: Any, viewer_selection: Any, system_name: str, mol: Any
+) -> np.ndarray | None:
+    """Atom mask of the user's viewer selection on ``system_name``, or ``None``.
+
+    ``viewer_selection`` maps ``moleculeID`` to a moleculekit atomselect
+    string (e.g. ``"index 1 2 5 to 10"``) populated by
+    ``mol.viewer_select(...)``. ``None`` covers any failure: missing
+    system, missing selection, or unparseable selection string.
+    """
+    system = _find_system(viewer_state, system_name)
+    if system is None or not isinstance(viewer_selection, dict):
+        return None
+    mol_id = system.get("moleculeID")
+    if not mol_id:
+        return None
+    sel = viewer_selection.get(mol_id)
+    if not sel:
+        return None
+    try:
+        return mol.atomselect(str(sel))
+    except RuntimeError:
+        return None
+
+
+def _residues_from_mask(mol: Any, mask: np.ndarray) -> set[tuple[str, int]]:
+    return set(zip(mol.chain[mask].tolist(), mol.resid[mask].tolist()))
+
+
+def _selected_residues(
+    viewer_state: Any, viewer_selection: Any, system_name: str, mol: Any
+) -> set[tuple[str, int]]:
+    """(chain, resid) pairs covered by the user's viewer selection."""
+    mask = _selected_atom_mask(viewer_state, viewer_selection, system_name, mol)
+    return _residues_from_mask(mol, mask) if mask is not None else set()
+
+
+def _iter_visible_reps(state: Any, system_name: str) -> Iterator[dict[str, Any]]:
+    system = _find_system(state, system_name)
+    if system is None:
+        return
+    for rep in system.get("representations") or []:
+        if rep.get("visibility", True) and rep.get("selection"):
+            yield rep
+
+
+def _residues_by_rep(
+    state: Any,
+    system_name: str,
+    mol: Any,
+    *,
+    types: tuple[str, ...],
+    color: int,
+) -> set[tuple[str, int]]:
+    """Residues covered by visible reps matching any of ``types`` and ``color``."""
+    out: set[tuple[str, int]] = set()
+    for rep in _iter_visible_reps(state, system_name):
+        if not any(s in str(rep.get("type", "")).lower() for s in types):
+            continue
+        if _normalize_color(rep.get("color_value")) != color:
+            continue
+        try:
+            mask = mol.atomselect(str(rep["selection"]))
+        except RuntimeError:
+            continue
+        out |= _residues_from_mask(mol, mask)
+    return out
+
+
+def _visible_chains(state: Any, system_name: str, mol: Any) -> set[str]:
+    chains: set[str] = set()
+    for rep in _iter_visible_reps(state, system_name):
+        try:
+            mask = mol.atomselect(str(rep["selection"]))
+        except RuntimeError:
+            continue
+        chains |= set(mol.chain[mask].tolist())
+    return chains
+
+
+def _visible_solid_color(state: Any, system_name: str) -> int | None:
+    """Single solid color shared by all visible reps, or ``None`` if reps disagree
+    or any rep uses a palette (``color_value`` unset)."""
+    seen: set[int] = set()
+    for rep in _iter_visible_reps(state, system_name):
+        c = _normalize_color(rep.get("color_value"))
+        if c is None:
+            return None
+        seen.add(c)
+    return seen.pop() if len(seen) == 1 else None
+
+
+# ---- mv-0254: 5TBY/5N69/8EFH single-motor myosin filter, align, color -----
+
+# Chains that may remain visible per PDB after dropping non-myosin partners
+# and the redundant heavy chain of any homo-dimer (chain A required).
+_MV0254_ALLOWED_CHAINS: dict[str, set[str]] = {
+    "5TBY": {"A", "C", "D", "E", "F"},
+    "5N69": {"A", "G", "H"},
+    "8EFH": {"A", "O", "P"},
+}
+_MV0254_RMSD_TOL_A = 8.0
+
+
+def mv0254_myosin_aligned(
+    artifact: RunArtifact, config: dict[str, Any]
+) -> AssertionResult:
+    pdbs = tuple(_MV0254_ALLOWED_CHAINS)
+    try:
+        mols = {pdb: artifact.load_system(pdb) for pdb in pdbs}
+    except KeyError as exc:
+        return _result(0.0, str(exc))
+    state = artifact.viewer_state()
+
+    visibility = [
+        (
+            "A" in visible and visible.issubset(_MV0254_ALLOWED_CHAINS[pdb]),
+            f"{pdb}: visible={sorted(visible)}, allowed={sorted(_MV0254_ALLOWED_CHAINS[pdb])}",
+        )
+        for pdb, visible in (
+            (pdb, _visible_chains(state, pdb, mols[pdb])) for pdb in pdbs
+        )
+    ]
+
+    colors = {pdb: _visible_solid_color(state, pdb) for pdb in pdbs}
+    color_passed = None not in colors.values() and len(set(colors.values())) == len(colors)
+    color_evidence = "colors: " + ", ".join(
+        f"{pdb}={c if c is None else f'#{c:06X}'}" for pdb, c in colors.items()
+    )
+
+    distances = {
+        (a, b): _chain_a_paired_rmsd(mols[a], mols[b])[0]
+        for a, b in itertools.combinations(pdbs, 2)
+    }
+    align_passed = all(d < _MV0254_RMSD_TOL_A for d in distances.values())
+    align_evidence = "chain-A paired RMSD: " + ", ".join(
+        f"{a}-{b}={d:.2f}Å" for (a, b), d in distances.items()
+    )
+
+    return _result(
+        all(p for p, _ in visibility) and color_passed and align_passed,
+        "; ".join([*(ev for _, ev in visibility), color_evidence, align_evidence]),
+    )
+
+
+# ---- mv-1jpz: 1JPZ Fe + substrate omega-C + pseudo-oxo atom highlight -----
+
+_MV1JPZ_PROT = "1JPZ"
+_MV1JPZ_OXO = "pseudo_oxo"
+_MV1JPZ_PROT_TRUTH = (
+    "(chain A and resname HEM and name FE) or "
+    "(chain A and resname 140 and name C18)"
+)
+
+
+def mv1jpz_atoms_highlighted(
+    artifact: RunArtifact, config: dict[str, Any]
+) -> AssertionResult:
+    try:
+        prot = artifact.load_system(_MV1JPZ_PROT)
+        oxo = artifact.load_system(_MV1JPZ_OXO)
+    except KeyError as exc:
+        return _result(0.0, str(exc))
+    state = artifact.viewer_state()
+    sel = artifact.viewer_selection()
+
+    prot_mask = _selected_atom_mask(state, sel, _MV1JPZ_PROT, prot)
+    oxo_mask = _selected_atom_mask(state, sel, _MV1JPZ_OXO, oxo)
+    prot_truth = prot.atomselect(_MV1JPZ_PROT_TRUTH)
+
+    prot_hit = int(prot_mask.sum()) if prot_mask is not None else 0
+    oxo_hit = int(oxo_mask.sum()) if oxo_mask is not None else 0
+    prot_passed = prot_mask is not None and bool(np.array_equal(prot_mask, prot_truth))
+    oxo_passed = oxo_hit == oxo.numAtoms
+
+    return _result(
+        prot_passed and oxo_passed,
+        f"1JPZ selection: {prot_hit} atoms (expected {int(prot_truth.sum())}); "
+        f"pseudo_oxo selection: {oxo_hit} atoms (expected {oxo.numAtoms})",
+    )
+
+
+# ---- mv-2ity: EGFR kinase 2ITY domain coloring + catalytic triad ----------
+
+_MV2ITY_PDB = "2ITY"
+_MV2ITY_CATALYTIC: set[int] = {745, 762, 855}
+
+# Generated by development/test_case_6.py.
+
+_MV2ITY_NLOBE: set[int] = {
+    712, 713, 714, 715, 716, 717, 718, 719, 720, 721, 722, 723, 724, 725, 726,
+    727, 728, 729, 730, 731, 732, 733, 734, 735, 736, 737, 738, 739, 740, 741,
+    742, 743, 744, 745, 746, 747, 748, 749, 750, 751, 752, 753, 754, 755, 756,
+    757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770,
+}
+_MV2ITY_CLOBE: set[int] = {
+    771, 772, 773, 774, 775, 776, 777, 778, 779, 780, 781, 782, 783, 784, 785,
+    786, 787, 788, 789, 790, 791, 792, 793, 794, 795, 796, 797, 798, 799, 800,
+    801, 802, 803, 804, 805, 806, 807, 808, 809, 810, 811, 812, 813, 814, 815,
+    816, 817, 818, 819, 820, 821, 822, 823, 824, 825, 826, 827, 828, 829, 830,
+    831, 832, 833, 834, 835, 836, 837, 838, 839, 840, 841, 842, 843, 844, 845,
+    846, 847, 848, 849, 850, 851, 852, 853, 854, 855, 856, 857, 858, 859, 860,
+    861, 862, 863, 864, 865, 876, 877, 878, 879, 880, 881, 882, 883, 884, 885,
+    886, 887, 888, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899, 900,
+    901, 902, 903, 904, 905, 906, 907, 908, 909, 910, 911, 912, 913, 914, 915,
+    916, 917, 918, 919, 920, 921, 922, 923, 924, 925, 926, 927, 928, 929, 930,
+    931, 932, 933, 934, 935, 936, 937, 938, 939, 940, 941, 942, 943, 944, 945,
+    946, 947, 948, 949, 950, 951, 952, 953, 954, 955, 956, 957, 958, 959, 960,
+    961, 962, 963, 964, 965, 966, 967, 968, 969, 970, 971, 972, 973, 974, 975,
+    976, 977, 978, 979,
+}
+
+
+def mv2ity_kinase_domains(
+    artifact: RunArtifact, config: dict[str, Any]
+) -> AssertionResult:
+    try:
+        mol = artifact.load_system(_MV2ITY_PDB)
+    except KeyError as exc:
+        return _result(0.0, str(exc))
+    state = artifact.viewer_state()
+
+    blue_cartoon = _chain_residues(_residues_by_rep(
+        state, _MV2ITY_PDB, mol, types=("cartoon",), color=_BLUE,
+    ))
+    yellow_cartoon = _chain_residues(_residues_by_rep(
+        state, _MV2ITY_PDB, mol, types=("cartoon",), color=_YELLOW,
+    ))
+    red_sticks = _chain_residues(_residues_by_rep(
+        state, _MV2ITY_PDB, mol, types=_STICK_TYPES, color=_RED,
+    ))
+
+    nlobe = _two_set_check(
+        blue_cartoon, _MV2ITY_NLOBE, _MV2ITY_CLOBE, "N-lobe blue cartoon"
+    )
+    clobe = _two_set_check(
+        yellow_cartoon, _MV2ITY_CLOBE, _MV2ITY_NLOBE, "C-lobe yellow cartoon"
+    )
+    triad = (
+        red_sticks == _MV2ITY_CATALYTIC,
+        f"red sticks: hit={sorted(red_sticks)}, expected={sorted(_MV2ITY_CATALYTIC)}",
+    )
+    parts = (nlobe, clobe, triad)
+    return _result(
+        all(p for p, _ in parts),
+        "; ".join(ev for _, ev in parts),
+    )
+
+
+# ---- mv-3830: 1IEP STI docking-pose RMSD against the experimental ligand ---
+
+# Generated by development/test_case_4.py.
+_MV3830_EXPECTED_A: float = 1.3967
+_MV3830_TOL_A = 0.05
+
+
+def mv3830_rmsd_correct(
+    artifact: RunArtifact, config: dict[str, Any]
+) -> AssertionResult:
+    """Pass iff the agent's reported RMSD matches the lowest aligned pose."""
+    reported = _parse_numeric_answer(artifact)
+    if reported is None:
+        return _result(0.0, "no <answer>X.XX</answer> tag in final answer")
+    diff = abs(reported - _MV3830_EXPECTED_A)
+    return _result(
+        diff <= _MV3830_TOL_A,
+        f"reported={reported:.3f} Å, expected={_MV3830_EXPECTED_A:.3f} Å, "
+        f"|Δ|={diff:.3f} Å (tol={_MV3830_TOL_A} Å)",
+    )
+
+
+# ---- mv-1ca2: CA2/CA1 chain-A alignment and differing residues -------------
+
+# Human carbonic anhydrase II (1CA2, P00918) and I (1HCB, P00915): 60.5%
+# identical over the aligned columns, 0.99 A optimal paired-CA RMSD. Both
+# entries are single-chain, so "chain A" is unambiguous.
+
+_MV1CA2_REF, _MV1CA2_MOB = "1CA2", "1HCB"
+_MV1CA2_RMSD_MAX_A = 5.0
+
+# Generated by development/test_case_1.py.
+
+_MV1CA2_MUST_HIT_REF: set[int] = {
+    4, 8, 9, 10, 15, 17, 19, 20, 24, 26, 27, 34, 36, 37, 38, 40, 42, 47,
+    52, 53, 56, 57, 58, 60, 62, 65, 67, 69, 71, 73, 74, 75, 76, 77, 84,
+    85, 86, 87, 91, 100, 101, 102, 103, 111, 112, 115, 120, 121, 125,
+    129, 130, 131, 132, 133, 135, 136, 137, 138, 144, 146, 147, 148,
+    152, 154, 156, 161, 163, 165, 166, 173, 175, 182, 183, 187, 191,
+    200, 204, 206, 211, 212, 215, 223, 224, 225, 228, 230, 231, 233,
+    236, 237, 238, 239, 240, 242, 243, 245, 248, 253, 255, 256, 257,
+}
+_MV1CA2_MUST_NOT_HIT_REF: set[int] = {
+    5, 6, 7, 11, 12, 13, 14, 16, 18, 21, 22, 23, 25, 28, 29, 30, 31, 32,
+    33, 35, 39, 41, 43, 44, 45, 46, 48, 49, 50, 51, 54, 55, 59, 61, 63,
+    64, 66, 68, 70, 72, 78, 79, 80, 81, 82, 83, 88, 89, 90, 92, 93, 94,
+    95, 96, 97, 98, 99, 104, 105, 106, 107, 108, 109, 110, 113, 114,
+    116, 117, 118, 119, 122, 123, 124, 127, 128, 134, 139, 140, 141,
+    142, 143, 145, 149, 150, 151, 153, 155, 157, 158, 159, 160, 162,
+    164, 167, 168, 169, 170, 171, 172, 174, 176, 177, 178, 179, 180,
+    181, 184, 185, 186, 188, 189, 190, 192, 193, 194, 195, 196, 197,
+    198, 199, 201, 202, 203, 205, 207, 208, 209, 210, 213, 214, 216,
+    217, 218, 219, 220, 221, 222, 226, 227, 229, 232, 234, 235, 241,
+    244, 246, 247, 249, 250, 251, 252, 254, 258, 259, 260,
+}
+_MV1CA2_MUST_HIT_MOB: set[int] = {
+    8, 9, 10, 15, 17, 19, 20, 24, 26, 27, 34, 36, 37, 38, 40, 42, 47,
+    52, 53, 56, 57, 58, 60, 62, 65, 67, 69, 71, 73, 74, 75, 76, 77, 84,
+    85, 86, 87, 91, 100, 101, 102, 103, 111, 112, 115, 120, 121, 129,
+    130, 131, 132, 133, 135, 136, 137, 138, 144, 146, 147, 148, 152,
+    154, 156, 161, 163, 165, 166, 173, 175, 182, 183, 187, 191, 200,
+    204, 206, 211, 212, 215, 223, 224, 225, 228, 230, 231, 233, 236,
+    237, 238, 239, 240, 242, 243, 245, 248, 253, 255, 256, 257,
+}
+_MV1CA2_MUST_NOT_HIT_MOB: set[int] = {
+    5, 6, 7, 11, 12, 13, 14, 16, 18, 21, 22, 23, 25, 28, 29, 30, 31, 32,
+    33, 35, 39, 41, 43, 44, 45, 46, 48, 49, 50, 51, 54, 55, 59, 61, 63,
+    64, 66, 68, 70, 72, 78, 79, 80, 81, 82, 83, 88, 89, 90, 92, 93, 94,
+    95, 96, 97, 98, 99, 104, 105, 106, 107, 108, 109, 110, 113, 114,
+    116, 117, 118, 119, 122, 123, 124, 127, 128, 134, 139, 140, 141,
+    142, 143, 145, 149, 150, 151, 153, 155, 157, 158, 159, 160, 162,
+    164, 167, 168, 169, 170, 171, 172, 174, 176, 177, 178, 179, 180,
+    181, 184, 185, 186, 188, 189, 190, 192, 193, 194, 195, 196, 197,
+    198, 199, 201, 202, 203, 205, 207, 208, 209, 210, 213, 214, 216,
+    217, 218, 219, 220, 221, 222, 226, 227, 229, 232, 234, 235, 241,
+    244, 246, 247, 249, 250, 251, 252, 254, 258, 259, 260,
+}
+
+
+def _chain_a_paired_rmsd(mob: Any, ref: Any) -> tuple[float, float, int]:
+    """No-fit and Kabsch-optimal paired-CA RMSDs on chain A.
+
+    ``optimal`` is the lower bound set by structural divergence between the
+    two proteins, ``agent`` is what the cell actually exported.
+    """
+    from moleculekit.tools.sequencestructuralalignment import sequenceStructureAlignment
+    from moleculekit.util import molRMSD
+
+    mols, masks = sequenceStructureAlignment(
+        mob, ref,
+        molsel="protein and chain A",
+        refsel="protein and chain A",
+        maxalignments=1,
+        nalignfragment=1,
+    )
+    mob_mask, ref_mask = masks[0]
+    mob_ca = np.where((mob.name == "CA") & mob_mask)[0]
+    ref_ca = np.where((ref.name == "CA") & ref_mask)[0]
+    return (
+        float(molRMSD(mob, ref, mob_ca, ref_ca)),
+        float(molRMSD(mols[0], ref, mob_ca, ref_ca)),
+        len(mob_ca),
+    )
+
+
+def _two_set_check(
+    hits: set[int], must_hit: set[int], must_not: set[int], name: str
+) -> tuple[bool, str]:
+    missing = must_hit - hits
+    forbidden = hits & must_not
+    passed = not missing and not forbidden
+    evidence = (
+        f"{name}: hit={len(hits)}, "
+        f"missing_must_hit={len(missing)}, "
+        f"forbidden_hit={len(forbidden)}"
+    )
+    return passed, evidence
+
+
+def mv1ca2_alignment(artifact: RunArtifact, config: dict[str, Any]) -> AssertionResult:
+    """CA1 chain A is within ``_MV1CA2_RMSD_MAX_A`` of CA2 chain A in the agent's export."""
+    try:
+        ref = artifact.load_system(_MV1CA2_REF)
+        mob = artifact.load_system(_MV1CA2_MOB)
+    except KeyError as exc:
+        return _result(0.0, str(exc))
+    agent, optimal, n = _chain_a_paired_rmsd(mob, ref)
+    return _result(
+        agent <= _MV1CA2_RMSD_MAX_A,
+        f"chain-A paired-CA RMSD: agent={agent:.2f} Å, optimal={optimal:.2f} Å "
+        f"(agent ≤ {_MV1CA2_RMSD_MAX_A:.2f} Å, n={n})",
+    )
+
+
+def mv1ca2_diff_residues_highlighted(
+    artifact: RunArtifact, config: dict[str, Any]
+) -> AssertionResult:
+    """Pass iff blue chain-A sticks satisfy MUST_HIT/MUST_NOT_HIT on either system."""
+    state = artifact.viewer_state()
+    cases = [
+        (_MV1CA2_MOB, _MV1CA2_MUST_HIT_MOB, _MV1CA2_MUST_NOT_HIT_MOB),
+        (_MV1CA2_REF, _MV1CA2_MUST_HIT_REF, _MV1CA2_MUST_NOT_HIT_REF),
+    ]
+    results = []
+    for name, must_hit, must_not in cases:
+        try:
+            mol = artifact.load_system(name)
+        except KeyError:
+            results.append((False, f"{name}: not loaded"))
+            continue
+        chain_a = _chain_residues(_residues_by_rep(
+            state, name, mol, types=_STICK_TYPES, color=_BLUE,
+        ))
+        results.append(_two_set_check(chain_a, must_hit, must_not, name))
+    for passed, evidence in results:
+        if passed:
+            return _result(1.0, evidence)
+    return _result(0.0, "; ".join(ev for _, ev in results))
+
+
+# ---- mv-5499: 8AYF V161C SG-SG distance after agent-driven mutation --------
+
+_MV5499_RESID = 161
+_MV5499_TOL_A = 0.1
+
+
+def _find_v161c_sgs(artifact: RunArtifact) -> tuple[str, Any, int, int] | str:
+    """Locate the SG atoms of Cys161 in chains A and B across exported systems.
+
+    On success: ``(system_name, mol, sg_a_index, sg_b_index)``. On failure:
+    a string explaining whether the mutation was missing entirely or whether
+    the residue was renamed but the sidechain was not built.
+    """
+    cys_without_sg = False
+    for name, _path in artifact.system_files():
+        try:
+            mol = artifact.load_system(name)
+        except (KeyError, OSError):
+            continue
+        a_resid = (mol.chain == "A") & (mol.resid == _MV5499_RESID)
+        b_resid = (mol.chain == "B") & (mol.resid == _MV5499_RESID)
+        if not ((a_resid & (mol.resname == "CYS")).any()
+                and (b_resid & (mol.resname == "CYS")).any()):
+            continue
+        sg_a = np.where(a_resid & (mol.name == "SG"))[0]
+        sg_b = np.where(b_resid & (mol.name == "SG"))[0]
+        if sg_a.size and sg_b.size:
+            return name, mol, int(sg_a[0]), int(sg_b[0])
+        cys_without_sg = True
+    if cys_without_sg:
+        return "CYS161 present but missing SG (sidechain not built)"
+    return "no loaded system has CYS at both A:161 and B:161"
+
+
+def mv5499_distance_correct(
+    artifact: RunArtifact, config: dict[str, Any]
+) -> AssertionResult:
+    """Pass iff the agent's reported SG-SG distance matches the structure."""
+    found = _find_v161c_sgs(artifact)
+    if isinstance(found, str):
+        return _result(0.0, found)
+    name, mol, ai, bi = found
+    actual = float(np.linalg.norm(mol.coords[ai, :, 0] - mol.coords[bi, :, 0]))
+    reported = _parse_numeric_answer(artifact)
+    if reported is None:
+        return _result(0.0, "no <answer>X.XX</answer> tag in final answer")
+    diff = abs(actual - reported)
+    return _result(
+        diff <= _MV5499_TOL_A,
+        f"system={name!r}, SG-SG actual={actual:.3f} Å, "
+        f"reported={reported:.3f} Å, |Δ|={diff:.3f} Å (tol={_MV5499_TOL_A} Å)",
+    )
+
+
+# ---- mv-8144: 5IL1 METTL3-METTL14 interface residues at 5 A ---------------
+
+_MV8144_PDB = "5IL1"
+
+# Generated by development/test_case_5.py.
+
+_MV8144_MUST_HIT_A: set[int] = {
+    427, 429, 434, 437, 438, 441, 450, 451, 452, 453, 454, 455, 456, 458, 463,
+    464, 465, 466, 467, 468, 469, 470, 471, 472, 473, 474, 475, 476, 477, 478,
+    479, 480, 482, 485, 494, 495, 496, 497, 498, 499, 500, 501, 502, 503, 504,
+    516, 520, 523, 524,
+}
+_MV8144_MUST_NOT_HIT_A: set[int] = {
+    369, 370, 371, 372, 373, 374, 375, 376, 377, 378, 379, 380, 381, 382, 383,
+    384, 385, 386, 387, 388, 389, 390, 391, 392, 393, 394, 395, 396, 397, 398,
+    399, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413,
+    414, 415, 416, 417, 418, 419, 420, 421, 422, 423, 424, 425, 426, 428, 430,
+    431, 432, 433, 439, 440, 442, 443, 444, 445, 446, 447, 448, 449, 457, 459,
+    461, 462, 481, 483, 484, 486, 487, 488, 489, 490, 491, 492, 493, 505, 506,
+    507, 508, 509, 510, 511, 512, 513, 514, 515, 517, 518, 519, 521, 522, 525,
+    526, 527, 528, 529, 530, 531, 532, 533, 534, 535, 536, 537, 538, 539, 540,
+    541, 542, 543, 544, 545, 546, 547, 548, 549, 550, 551, 552, 553, 554, 555,
+    556, 557, 558, 559, 560, 561, 562, 563, 564, 565, 566, 567, 568, 569, 570,
+    601,
+}
+_MV8144_MUST_HIT_B: set[int] = {
+    117, 118, 119, 120, 121, 123, 124, 129, 130, 131, 133, 134, 135, 136, 137,
+    142, 143, 145, 146, 149, 238, 239, 241, 242, 245, 255, 256, 257, 258, 259,
+    260, 262, 277, 278, 279, 280, 281, 282, 283, 284, 285, 287, 290, 292, 296,
+    298, 305, 307, 308, 310, 311, 312, 313, 315, 333, 337, 397, 398, 399, 400,
+}
+_MV8144_MUST_NOT_HIT_B: set[int] = {
+    122, 125, 126, 127, 128, 132, 138, 139, 140, 141, 144, 147, 148, 150, 151,
+    152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166,
+    167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181,
+    182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196,
+    197, 198, 199, 200, 201, 202, 204, 205, 206, 207, 208, 209, 210, 211, 212,
+    213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227,
+    228, 229, 231, 233, 234, 235, 236, 243, 244, 246, 247, 248, 249, 250, 251,
+    252, 253, 254, 261, 263, 264, 265, 266, 267, 268, 269, 270, 272, 273, 275,
+    276, 286, 288, 289, 291, 293, 294, 295, 299, 300, 301, 302, 303, 304, 314,
+    316, 317, 318, 319, 320, 321, 322, 323, 324, 325, 326, 327, 328, 330, 331,
+    332, 334, 335, 336, 338, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348,
+    349, 350, 351, 352, 353, 354, 355, 356, 357, 358, 359, 360, 361, 362, 363,
+    364, 365, 366, 367, 368, 369, 370, 371, 372, 373, 374, 375, 376, 377, 378,
+    379, 380, 381, 382, 383, 384, 385, 386, 387, 388, 389, 390, 391, 392, 393,
+    394, 395, 396, 401, 402,
+}
+
+
+def mv8144_interface_highlighted(
+    artifact: RunArtifact, config: dict[str, Any]
+) -> AssertionResult:
+    """Pass iff the viewer selection covers the 5 Å interface on both chains."""
+    try:
+        mol = artifact.load_system(_MV8144_PDB)
+    except KeyError as exc:
+        return _result(0.0, str(exc))
+    hits = _selected_residues(
+        artifact.viewer_state(), artifact.viewer_selection(), _MV8144_PDB, mol
+    )
+    cases = (
+        ("A", _MV8144_MUST_HIT_A, _MV8144_MUST_NOT_HIT_A),
+        ("B", _MV8144_MUST_HIT_B, _MV8144_MUST_NOT_HIT_B),
+    )
+    results = [
+        _two_set_check(
+            _chain_residues(hits, chain), must_hit, must_not, f"chain {chain}",
+        )
+        for chain, must_hit, must_not in cases
+    ]
+    passed = all(p for p, _ in results)
+    return _result(passed, "; ".join(ev for _, ev in results))
+
+
+# ---- mv-7fab: 7FAB disulfide-bonded cysteines -----------------------------
+
+_MV7FAB_PDB = "7FAB"
+
+# Generated by development/test_case_7.py.
+
+_MV7FAB_SS_H: set[int] = {22, 95, 144, 200}
+_MV7FAB_SS_L: set[int] = {22, 83, 130, 189}
+
+
+def mv7fab_disulfides(
+    artifact: RunArtifact, config: dict[str, Any]
+) -> AssertionResult:
+    try:
+        mol = artifact.load_system(_MV7FAB_PDB)
+    except KeyError as exc:
+        return _result(0.0, str(exc))
+    hits = _selected_residues(
+        artifact.viewer_state(), artifact.viewer_selection(), _MV7FAB_PDB, mol
+    )
+    h_passed = _chain_residues(hits, "H") == _MV7FAB_SS_H
+    l_passed = _chain_residues(hits, "L") == _MV7FAB_SS_L
+    return _result(
+        h_passed and l_passed,
+        f"chain H: hit={sorted(_chain_residues(hits, 'H'))}, "
+        f"expected={sorted(_MV7FAB_SS_H)}; "
+        f"chain L: hit={sorted(_chain_residues(hits, 'L'))}, "
+        f"expected={sorted(_MV7FAB_SS_L)}",
+    )
+
+
+# ---- mv-6316: 6FCX active-site residues within 6 A of SAH ------------------
+
+_MV6316_PDB = "6FCX"
+
+# Generated by development/test_case_2.py.
+
+_MV6316_POCKET_A: frozenset[tuple[str, int]] = frozenset(
+    ("A", r) for r in {
+        345, 348, 349, 365, 368, 369, 435, 438, 439, 453, 456, 459, 460, 461,
+        462, 463, 464, 471, 475, 481, 482, 483, 484, 485, 486, 500, 509, 512,
+        513, 514, 560, 572, 573, 702,
+    }
+)
+_MV6316_POCKET_B: frozenset[tuple[str, int]] = frozenset(
+    ("B", r) for r in {
+        345, 348, 349, 365, 368, 369, 435, 438, 439, 453, 456, 459, 460, 461,
+        462, 463, 464, 471, 475, 481, 482, 483, 484, 485, 486, 500, 509, 513,
+        514, 559, 560, 572, 573, 702,
+    }
+)
+_MV6316_VALID: tuple[tuple[str, frozenset[tuple[str, int]]], ...] = (
+    ("A", _MV6316_POCKET_A),
+    ("B", _MV6316_POCKET_B),
+    ("A∪B", _MV6316_POCKET_A | _MV6316_POCKET_B),
+)
+
+
+def mv6316_active_site_highlighted(
+    artifact: RunArtifact, config: dict[str, Any]
+) -> AssertionResult:
+    """Pass iff blue stick reps on 6FCX cover exactly chain A's, chain B's,
+    or the union active-site residues (within 6 Å of SAH)."""
+    try:
+        mol = artifact.load_system(_MV6316_PDB)
+    except KeyError as exc:
+        return _result(0.0, str(exc))
+    hits = frozenset(_residues_by_rep(
+        artifact.viewer_state(), _MV6316_PDB, mol, types=_STICK_TYPES, color=_BLUE,
+    ))
+    for label, expected in _MV6316_VALID:
+        if hits == expected:
+            return _result(1.0, f"exact match against {label} (n={len(expected)})")
+    diffs = ", ".join(
+        f"{label}: missing={len(expected - hits)} extra={len(hits - expected)}"
+        for label, expected in _MV6316_VALID
+    )
+    return _result(0.0, f"hit={len(hits)}; {diffs}")
+
+
+# ---- mv-6568: POPC/cholesterol membrane composition + ratio ----------------
+
+# Generated by development/test_case_10.py.
+
+_MV6568_SYSTEM = "membrane"
+_MV6568_PC_RESNAME = "POPC"
+_MV6568_CHL_RESNAME = "CHL1"
+_MV6568_RATIO_TRUTH = 622 / 62
+_MV6568_RATIO_TOL_PCT = 0.05
+
+
+def mv6568_membrane_composition(
+    artifact: RunArtifact, config: dict[str, Any]
+) -> AssertionResult:
+    try:
+        mol = artifact.load_system(_MV6568_SYSTEM)
+    except KeyError as exc:
+        return _result(0.0, str(exc))
+    state = artifact.viewer_state()
+
+    pc_truth = _residues_from_mask(mol, mol.atomselect(f"resname {_MV6568_PC_RESNAME}"))
+    chl_truth = _residues_from_mask(mol, mol.atomselect(f"resname {_MV6568_CHL_RESNAME}"))
+    pc_hit = _residues_by_rep(state, _MV6568_SYSTEM, mol, types=_STICK_TYPES, color=_BLUE)
+    chl_hit = _residues_by_rep(state, _MV6568_SYSTEM, mol, types=_STICK_TYPES, color=_YELLOW)
+
+    answer = _parse_numeric_answer(artifact)
+    if answer is None or answer <= 0:
+        ratio_passed = False
+        ratio_evidence = f"answer={answer!r} (expected ≈{_MV6568_RATIO_TRUTH:.2f})"
+    else:
+        rel_err = abs(answer - _MV6568_RATIO_TRUTH) / _MV6568_RATIO_TRUTH
+        ratio_passed = rel_err <= _MV6568_RATIO_TOL_PCT
+        ratio_evidence = (
+            f"answer={answer:.3f} (expected {_MV6568_RATIO_TRUTH:.3f}, "
+            f"rel err {rel_err * 100:.1f}%)"
+        )
+
+    return _result(
+        pc_hit == pc_truth and chl_hit == chl_truth and ratio_passed,
+        f"PC blue: hit={len(pc_hit)}/{len(pc_truth)}; "
+        f"CHL yellow: hit={len(chl_hit)}/{len(chl_truth)}; "
+        f"ratio: {ratio_evidence}",
+    )

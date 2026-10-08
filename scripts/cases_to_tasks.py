@@ -13,6 +13,7 @@ import yaml
 
 IMAGE = "pmai-eval:latest"
 HERE = Path(__file__).parent
+VIEWER_COMPOSE = HERE.parent / "viewer/compose.yaml"
 VIEWER_DATA = re.compile(r"artifact\.(viewer_state|viewer_selection|load_system|system_files)")
 TEST_SH = "#!/bin/bash\nPYTHONPATH=/opt exec /opt/grader/bin/pytest /tests -q -p pmai_evals.reward\n"
 TOML = """schema_version = "1.4"
@@ -31,7 +32,7 @@ timeout_sec = 600
 {image}network_mode = "public"
 cpus = 2
 memory_mb = 8192
-"""
+{env}"""
 
 
 def port(src: Path, out: Path) -> None:
@@ -42,8 +43,7 @@ def port(src: Path, out: Path) -> None:
         (src / "checks.py").read_text(),
         flags=re.M,
     )
-    if VIEWER_DATA.search(checks):
-        sys.exit(f"{src}: the checks read viewer data, port this set with the viewer (phase 5)")
+    viewer = bool(VIEWER_DATA.search(checks))  # the set's tasks get the viewer sidecar
     truth = sorted(set(re.findall(r'FIXTURES / "([^"]+)"', checks)))  # files the checks read
     for case in yaml.safe_load((src / "cases.yaml").read_text())["cases"]:
         task = out / case["id"]
@@ -51,7 +51,7 @@ def port(src: Path, out: Path) -> None:
         (task / "tests").mkdir(parents=True)
         pre = case.get("preload") or {}
         view = pre.get("viewer") or {}
-        if view.get("pdb_ids"):  # the prompts name the entries, so the agent can get them itself
+        if view.get("pdb_ids") and not viewer:  # the prompts name the entries: the agent can get them
             print(f"{case['id']}: no viewer, {view['pdb_ids']} not preloaded")
         # the old harness uploaded each file to the project root by its basename
         files = [Path(f) for f in (pre.get("project") or {}).get("files", []) + view.get("files", [])]
@@ -65,6 +65,12 @@ def port(src: Path, out: Path) -> None:
             )
         else:
             env.joinpath(".gitkeep").touch()
+        preload = ""
+        if viewer:  # a copy: Harbor refuses a link out of the task (git datasets)
+            shutil.copy(VIEWER_COMPOSE, env / "docker-compose.yaml")
+            start = {"pdb_ids": view.get("pdb_ids"), "files": [Path(f).name for f in view.get("files", [])]}
+            start = {k: v for k, v in start.items() if v}  # the files are in /app too (above)
+            preload = f"env = {{ VIEWER_PRELOAD = {json.dumps(json.dumps(start) if start else '')} }}\n"
         timeout = case.get("timeout_s") or spec.get("default_timeout_s") or 1800
         (task / "task.toml").write_text(
             TOML.format(
@@ -72,6 +78,7 @@ def port(src: Path, out: Path) -> None:
                 tags=json.dumps(case.get("tags", [])),
                 timeout=timeout,
                 image="" if files else f'docker_image = "{IMAGE}"\n',
+                env=preload,
             )
         )
         (task / "instruction.md").write_text(case["prompt"])
