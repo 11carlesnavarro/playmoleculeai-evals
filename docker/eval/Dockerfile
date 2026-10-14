@@ -4,10 +4,10 @@ FROM ${SANDBOX}
 USER root
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# the grader: pinned, so reference values do not move when the sandbox moves
+# the grader: its own venv, so the tests do not depend on the sandbox's python
 # (first: a new pmai wheel does not install it again)
 RUN uv venv /opt/grader --python 3.12 \
- && uv pip install --python /opt/grader pytest anthropic pandas rdkit "moleculekit<1.12"
+ && uv pip install --python /opt/grader pytest anthropic
 
 # the agent: only the pmai command is on PATH, so tools still see the sandbox python
 COPY dist/*.whl /tmp/dist/

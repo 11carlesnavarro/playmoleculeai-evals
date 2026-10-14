@@ -83,12 +83,11 @@ def test_read_only_folder(tmp_path):
 
 @contextmanager
 def fake_viewer(routes: dict):
-    """The sidecar's control API: path -> (status, body), or a function of the POST body."""
+    """The sidecar's control API: path -> (status, body). The last POST body is routes["posted"]."""
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            route = routes[self.path]
-            status, body = route(routes.get("posted")) if callable(route) else route
+            status, body = routes[self.path]
             self.send_response(status)
             self.end_headers()
             self.wfile.write(body)
@@ -110,27 +109,12 @@ def fake_viewer(routes: dict):
 
 
 def test_viewer(tmp_path, monkeypatch):
-    monkeypatch.setattr(trial, "SNAPSHOT", tmp_path / "snapshot")
-    state = {"systems": {"u1": {"type": "structure"}, "v1": {"type": "volume"}, "u2": {"type": "structure"}}}
-
-    def python(code):  # PMView's Python, as the agent's pmview_run_python gives it
-        if "get_system('u2')" in code:
-            return 200, json.dumps({"stdout": "", "stderr": "ValueError: no atoms"}).encode()
-        value = {"u1": "index 0"} if "selection" in code else "data_u1"
-        value = state if "get_viewer_state" in code else value
-        return 200, json.dumps({"stdout": json.dumps(value) + "\n", "stderr": ""}).encode()
-
-    routes = {"/python": python, "/screenshot": (200, b"PNG")}
+    monkeypatch.setattr(trial, "FINAL_VIEW", tmp_path / "viewer" / "final-view.png")
+    routes = {"/python": (200, b'{"stdout": "2\\n", "stderr": ""}'), "/screenshot": (200, b"PNG")}
     with fake_viewer(routes) as url:
         monkeypatch.setattr(trial, "VIEWER", url)
-        assert trial.viewer_state() == state
-        assert trial.viewer_selection() == {"u1": "index 0"}
-        assert trial.viewer_system("u1").read_text() == "data_u1"
-        with pytest.raises(KeyError, match="ValueError: no atoms"):  # one bad system, not all
-            trial.viewer_system("u2")
-        with pytest.raises(KeyError, match="not a structure"):
-            trial.viewer_system("v1")
-        assert trial.viewer_screenshot() == b"PNG"
+        assert trial.viewer_python("print(1 + 1)")["stdout"] == "2\n"
+        assert routes["posted"] == "print(1 + 1)"
         assert trial.final_image().read_bytes() == b"PNG"
         routes["/screenshot"] = (200, b"later")
         assert trial.final_image().read_bytes() == b"PNG"  # kept: a regrade sees the same image
@@ -141,15 +125,8 @@ def test_viewer(tmp_path, monkeypatch):
         with pytest.raises(RuntimeError, match="502 pmview_run_python: Pyodide crashed"):
             trial.viewer_python("1")
     monkeypatch.setattr(trial, "VIEWER", None)
-    assert trial.viewer_state() == state  # a later grade reads the snapshot: no viewer
-
-    monkeypatch.setattr(trial, "SNAPSHOT", tmp_path / "none")
     with pytest.raises(InfraError, match="the task needs"):
-        trial.viewer_state()
+        trial.viewer_screenshot()
     monkeypatch.setattr(trial, "VIEWER", url)  # the server is gone
     with pytest.raises(InfraError, match="Connection refused"):
-        trial.viewer_state()
-    with fake_viewer({"/python": (200, b'{"stdout": "", "stderr": "NameError: pmv"}')}) as url:
-        monkeypatch.setattr(trial, "VIEWER", url)
-        with pytest.raises(RuntimeError, match="NameError"):
-            trial.viewer_selection()
+        trial.viewer_screenshot()

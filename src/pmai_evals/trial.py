@@ -20,7 +20,7 @@ WORK = Path(_work.read_text().strip()) if _work.exists() else Path("/app")
 VIEWER = os.environ.get("VIEWER_URL")  # viewer tasks only: docker/viewer/compose.yaml sets it
 # /logs/artifacts: Harbor keeps it on the host at <trial>/artifacts/logs/artifacts
 ARTIFACTS = LOGS.parent / ("artifacts" if Path("/logs/agent") == LOGS else "artifacts/logs/artifacts")
-SNAPSHOT = ARTIFACTS / "viewer" / "snapshot"  # next to the sidecar's evidence
+FINAL_VIEW = ARTIFACTS / "viewer" / "final-view.png"  # next to the sidecar's evidence
 
 
 @cache
@@ -106,59 +106,9 @@ def _viewer(path: str, data: bytes | None = None) -> bytes:
 
 
 def viewer_python(code: str) -> dict:
-    """Run code in PMView, as the agent's pmview_run_python: {stdout, stderr, result}.
+    """Run code in PMView, as the agent's pmview_python: {stdout, stderr, result}.
     pmv, Molecule and np are already imported there."""
     return json.loads(_viewer("/python", code.encode()))
-
-
-def _pmv(value: str, before: str = ""):
-    out = viewer_python(f"import json\n{before}\nprint(json.dumps({value}, default=str))")
-    try:
-        return json.loads(out["stdout"])
-    except (KeyError, ValueError):
-        raise RuntimeError(f"viewer python: {out.get('stderr') or out.get('error')}") from None
-
-
-def _snapshot() -> Path:
-    """The viewer after the turn, read once through the agent's API and kept in the trial's artifacts.
-    The tests read this copy, so a later grade on the host (TRIAL_LOGS) needs no viewer. viewer_python
-    still runs on the live viewer."""
-    systems = SNAPSHOT / "systems"
-    if not (SNAPSHOT / "state.json").exists():  # written last: the snapshot is complete
-        state = _pmv("pmv.get_viewer_state()")
-        no_selection = "try:\n    s = pmv.get_viewer_selection()\nexcept TypeError:\n    s = None"
-        selection = _pmv("dict(s or {})", no_selection)
-        systems.mkdir(parents=True, exist_ok=True)
-        for d in (SNAPSHOT, systems):  # on NFS root is nobody here: the host user must still delete the files
-            d.chmod(0o777)
-        for uuid, system in state["systems"].items():
-            if system.get("type") != "structure":  # a volume: get_system cannot give it
-                continue
-            try:  # mmCIF: in PMView's Python the PDB writer needs networkx
-                cif = _pmv("open('/tmp/eval.cif').read()", f"pmv.get_system({uuid!r}).write('/tmp/eval.cif')")
-                (systems / f"{uuid}.cif").write_text(cif)
-            except RuntimeError as error:  # one bad system: the checks that need it fail, not all
-                (systems / f"{uuid}.error").write_text(str(error))
-        (SNAPSHOT / "selection.json").write_text(json.dumps(selection))
-        (SNAPSHOT / "state.json").write_text(json.dumps(state))
-    return SNAPSHOT
-
-
-def viewer_state() -> dict:  # {"systems", "tables", "plots", "files"}
-    return json.loads((_snapshot() / "state.json").read_text())
-
-
-def viewer_selection() -> dict:  # {uuid: atom selection}; before the first selection PMView raises TypeError
-    return json.loads((_snapshot() / "selection.json").read_text())
-
-
-def viewer_system(uuid: str) -> Path:
-    """A structure in the viewer, as an mmCIF file. KeyError when the viewer could not give it."""
-    cif = _snapshot() / "systems" / f"{uuid}.cif"
-    if not cif.exists():
-        error = cif.with_suffix(".error")
-        raise KeyError(f"system {uuid}: {error.read_text() if error.exists() else 'not a structure'}")
-    return cif
 
 
 def viewer_screenshot() -> bytes:  # PNG of the viewport, as the user and the agent see it
@@ -166,9 +116,8 @@ def viewer_screenshot() -> bytes:  # PNG of the viewport, as the user and the ag
 
 
 def final_image() -> Path:
-    """The viewer after the turn, kept next to the snapshot: a later rating or judge needs no viewer."""
-    png = SNAPSHOT.parent / "final-view.png"
-    if not png.exists():
-        png.parent.mkdir(parents=True, exist_ok=True)
-        png.write_bytes(viewer_screenshot())
-    return png
+    """The viewer after the turn, kept in the trial's artifacts: a later rating or judge needs no viewer."""
+    if not FINAL_VIEW.exists():
+        FINAL_VIEW.parent.mkdir(parents=True, exist_ok=True)
+        FINAL_VIEW.write_bytes(viewer_screenshot())
+    return FINAL_VIEW
