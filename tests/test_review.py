@@ -1,6 +1,7 @@
 """pmai_evals.review: a run for the review page, and the ratings back."""
 
 import json
+from datetime import UTC, datetime
 
 import pytest
 
@@ -83,10 +84,13 @@ def test_combine(tmp_path, monkeypatch):
             "config": {"agent": {"name": "pmai"}, "task": {"source": "cases"}},
             "agent_result": {"cost_usd": 0.25},
             "verifier_result": {"rewards": {"reward": 1.0}}}))
-        finished = None if date.endswith("140000") else "2026-10-08T13:00:00"  # the last run is still going
+        going = date.endswith("140000")  # the last run is still going: Harbor's updated_at has a zone
+        finished = None if going else "2026-10-08T13:00:00"
+        updated = datetime(2026, 10, 8, 12, 30).astimezone().astimezone(UTC) if going else None
         stats = {"n_trials": 1, "metrics": [{"reward": 1.0}]}
         (run / "result.json").write_text(json.dumps({
-            "started_at": "2026-10-08T12:00:00", "updated_at": "2026-10-08T12:30:00", "finished_at": finished,
+            "started_at": "2026-10-08T12:00:00", "updated_at": updated and updated.isoformat(),
+            "finished_at": finished,
             "n_total_trials": 1, "stats": {"n_completed_trials": 1, "cost_usd": 0.5,
                                            "evals": {"pmai__m1__cases": stats}}}))
         (run / "config.json").write_text(json.dumps({"job_name": run.name, "agents": [{"name": "pmai"}],

@@ -47,6 +47,13 @@ KEY = "human_reward"  # the review score in harbor view
 RUN = re.compile(r"(.+)-(\d{8})-(\d{6})")  # results/<eval>-<job file>-<date>, see NAME in the Makefile
 
 
+def _local(stamp: str) -> datetime:
+    """A Harbor time as local time. Harbor writes local times with no zone, but while a job runs its
+    updated_at comes from the trial events, in UTC with an offset."""
+    t = datetime.fromisoformat(stamp)
+    return t.astimezone().replace(tzinfo=None) if t.tzinfo else t
+
+
 def _seconds(span: dict | None) -> float | None:
     if not (span and span.get("started_at") and span.get("finished_at")):
         return None
@@ -269,8 +276,8 @@ def combine(results: Path, view: Path) -> None:
                     costs[key] += cost
                     if rating is not None:
                         scores[key].append(rating)
-            starts.append(datetime.fromisoformat(job["started_at"]))
-            end = datetime.fromisoformat(job.get("finished_at") or job["updated_at"])
+            starts.append(_local(job["started_at"]))
+            end = _local(job.get("finished_at") or job["updated_at"])
             run_seconds = (end - starts[-1]).total_seconds()
             seconds += run_seconds
             for key, stats in job["stats"]["evals"].items():
