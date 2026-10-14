@@ -1,6 +1,6 @@
 # Round 8
 
-Status: proposed, not applied.
+Status: applied, run (`viewer-quality-train-20261014-150617`) and reviewed: mean 8.07. See Result.
 
 ## Where we are
 
@@ -166,3 +166,51 @@ apply it only to analysis tasks?
 Compare round 8 with round 7 by rubric line: the label lines (labels-3hs4, resistance), the deepsite map, the pose
 colours, the compare zoom, and the camera lines of all cases (change 3 deletes a camera sentence). Also count the
 steps that only read the state, the sandbox calls in deepsite, and the cost (round 7: $0.32).
+
+## Applied
+
+- Change 1: the result state gives each structure's `representations` (from `get_viewer_state()` in the viewer's
+  Python, without the arguments at their defaults), each map's `volumeParameters` (isovalue, its range, colour,
+  opacity), and `camera` (`position`, `target`, `up`). User messages get the same state. `print(mol.reps[i])` and
+  `print(vol.reps[0])` give a dict. `get_viewer_state()` prints the note when changes wait. `len(vol.reps)` and
+  `vol.reps[0]` work. `pmv.camera(position=, target=, up=)`; `pmv.camera_turn(azimuth=, elevation=, roll=)`.
+- Change 2: `params=` on `reps.add`, `reps.update`, `mol.view` and `vol.reps.update`; `None` sets a setting back to
+  its default. PMView sends Mol*'s list of settings to the viewer's Python at start, so a wrong name or value fails at
+  the call, with the right names. Settings that an argument sets (`alpha`, `sizeFactor`, `labelFields`, `isoValue`)
+  are refused with the argument's name. `pmv.params(style)` prints the settings. A change in the map panel keeps the
+  map's `params` (tested with the isovalue box; the colour and opacity controls not tested).
+- Change 3: all five text changes. The pmview skill describes the camera, `params`, label placement and map
+  clipping. `AGENT.md` is not changed: your decision is open.
+- Change 4: the name given with `hold=True` stays.
+- Tested on this host (sidecar on port 8799, PMView build, 1IEP and 7Y5K with its map): the camera numbers match VTK
+  9.7.1 (azimuth 30, elevation 15, roll 90); labels with `attachment` sit beside their atoms with a line; a clip
+  sphere with `invert` keeps only the map inside it (`scale` is the diameter, Mol* shader) and `None` removes it;
+  wrong names and values fail at the call and leave the representation as it was; PMAI's tools return the new state.
+  PMAI tests pass. tsc, eslint and ruff errors are only in lines that were there before.
+- Found in the test and fixed: Pyodide passes `None` as `undefined`, so `None` did not reset a setting; Pyodide's
+  Python 3.13 removes the indent of docstrings, so the docstring additions did not apply.
+- Seen in the test, not changed: `get_viewer_state()` right after `pmview_load` can miss the new objects for about
+  0.3 s. Not measured in runs.
+
+Run, as slurmweb: `make image && make viewer && make run JOB=evals/viewer-quality/train.yaml` (about $0.3 to $0.4).
+
+## Result
+
+Mean 8.07 on 14 cases (surface-1a52 has one empty check; round 7: 9.0 on the same 14). 15/15 trials, $0.36 (round 7:
+$0.32), agent time 4,289 s (3,989 s). 6 cases worse, 2 better, 6 the same: a sign test gives p = 0.29, so the drop can
+be noise.
+
+- Better: deepsite 6 → 7 (the map clip kept compact pockets), resistance 7 → 10 (no label; `pmv.visible` checked
+  Thr790). labels-3hs4 passed the readability line with labels beside their atoms (`attachment`, `tether`, `offsetZ`).
+- Worse: chains 10 → 5 (gold hemes inside an orange chain, on black; no palette read), interface 10 → 6 (framed the
+  whole complex, "focusing clips other contents"; the crop put the centred interface at the top right), pocket-1hsg
+  10 → 6 (framed ligand and pocket; more cartoon in front), labels-3hs4 7 → 6 (sticks cut to single atoms), hbonds
+  10 → 8 (no labels; round 7 had none and passed), pocket-1m17 10 → 9 (cartoon removed).
+- Same: poses 7 (the crystal ligand does not stand out), compare 9 (whole proteins).
+- Changes: no reads of object internals (round 7: 11); the name with `hold=True` kept 12 of 12; map representations
+  work; 10 `params` uses and 47 camera calls, 0 errors; skill read calls 60 → 23 (palette 9 → 1 trials, data-retrieval
+  11 → 1). 10 of 15 trials cost less; slide, covalent and labels-3hs4 cost more.
+- Faults: the camera is in the result but not in `pmv.get_viewer_state()` (4 KeyErrors); mask selections print every
+  atom index (about half of the new state text); `print(mol.reps[i])` fails for a mask; `size_theme` shows in 361 of
+  373 representations. A representation change can move the camera (covalent, slide), and 68 of 108 images to the
+  agent are cropped (both also in round 7). Causes and the next changes: `round-9.md`.

@@ -145,6 +145,12 @@ your score is `human_reward` in `make view`.
 - 2026-10-14: round 7 run `viewer-quality-train-20261014-115559` ($0.32, 15/15) and reviewed
   (`ratings/viewer-quality-train-20261014-115559.json`): mean 9.07 / 10. Worse: labels-3hs4, resistance (labels), poses
   (colours). deepsite still 6. Details in `proposals/round-7.md`, Result. Round 8 proposed (`proposals/round-8.md`).
+- 2026-10-14: round 8 applied and tested on this host, not run (`proposals/round-8.md`, Applied): the state gives the
+  representations and the camera, `pmv.camera`, `camera_turn(azimuth, elevation, roll)`, Mol* settings by name
+  (`params=`, `pmv.params`), less steering in the skills. The round 7 state is committed in the four repos.
+- 2026-10-14: round 8 run `viewer-quality-train-20261014-150617` ($0.36, 15/15) and reviewed
+  (`ratings/viewer-quality-train-20261014-150617.json`): mean 8.07 on 14 cases (round 7: 9.0 on the same 14; p = 0.29,
+  can be noise). Details in `proposals/round-8.md`, Result. Round 9 proposed (`proposals/round-9.md`).
 - 2026-10-13: no Harbor reward until the judge. The reward was 1.0 when the view was saved, so it said nothing. The
   job files turn the verifier off, the agent wrapper keeps the final view after the turn, vq-slide-3ptb lists its
   file as a Harbor artifact, and `make view` shows no verifier rewards for the runs of this eval (also the old ones).
