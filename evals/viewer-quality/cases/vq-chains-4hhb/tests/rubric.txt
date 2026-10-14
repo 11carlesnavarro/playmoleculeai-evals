@@ -1,4 +1,4 @@
-All four chains are visible, each in a distinct color.
-The four hemes are visible (sticks or spheres), not lost inside the cartoon.
-The heme color is clearly different from all chain colors.
-The whole tetramer fits in the view, and waters are hidden.
+4 All four chains are visible, each in a distinct color.
+4 The four hemes are visible (sticks or spheres), not lost inside the cartoon.
+1 The heme color is clearly different from all chain colors.
+1 The whole tetramer fits in the view, and waters are hidden.

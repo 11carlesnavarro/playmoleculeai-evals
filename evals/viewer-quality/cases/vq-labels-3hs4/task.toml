@@ -1,0 +1,18 @@
+schema_version = "1.4"
+
+[task]
+name = "acellera/vq-labels-3hs4"
+keywords = ["viewer-quality", "labels"]
+
+[metadata]
+source = "prod 2808, open 6373, 6149"
+
+[agent]
+timeout_sec = 1800
+
+[environment]
+docker_image = "pmai-eval:latest"
+network_mode = "public"
+cpus = 2
+memory_mb = 8192
+env = { VIEWER_PRELOAD = "" }

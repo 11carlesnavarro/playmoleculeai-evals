@@ -1,12 +1,19 @@
 # Viewer quality, the 15 hill climbing cases (cases/; the 5 others are in
 # holdout.yaml). make viewer first. gpt-6-luna, once: expect less than $1.
-# The score is your rating of artifacts/logs/artifacts/viewer/final-view.png; the reward says only that it was saved.
 n_attempts: 1
 n_concurrent_trials: 3
+# A trial that the model provider stops (UnknownApiError: pmai's [LLM_FAILED]) runs once more
+retry:
+  max_retries: 1
+  include_exceptions: [UnknownApiError]
+# No score until the judge: the trial keeps the final view, and you rate it (make review).
+# At the end of a run, Harbor prints a mean of 0.000: no trial has a score.
+verifier:
+  disable: true
 datasets:
   - path: evals/viewer-quality/cases
     task_names: [vq-chains-4hhb, vq-cleanup-1jpz, vq-compare-vrk, vq-covalent-6oim, vq-deepsite-7y5k,
-                 vq-glycans-6vxx, vq-hbonds-1iep, vq-interface-1n8z, vq-labels-6lu7, vq-pocket-1hsg,
+                 vq-glycans-6vxx, vq-hbonds-1iep, vq-interface-1n8z, vq-labels-3hs4, vq-pocket-1hsg,
                  vq-pocket-1m17, vq-poses-1iep, vq-resistance-1m17, vq-slide-3ptb, vq-surface-1a52]
 agents:
   - name: pmai

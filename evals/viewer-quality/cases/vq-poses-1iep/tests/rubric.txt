@@ -1,4 +1,4 @@
-Only 5 poses and the crystal imatinib are shown, not all 20 poses.
-Each pose has its own color and thin sticks, and the crystal ligand stands out.
-The pocket is in view, and the protein does not hide the poses.
-Waters are hidden, and the view is not crowded.
+4 Only 5 poses and the crystal imatinib are shown, not all 20 poses.
+3 Each pose has its own color and thin sticks, and the crystal ligand stands out.
+2 The pocket is in view, and the protein does not hide the poses.
+1 Waters are hidden, and the view is not crowded.

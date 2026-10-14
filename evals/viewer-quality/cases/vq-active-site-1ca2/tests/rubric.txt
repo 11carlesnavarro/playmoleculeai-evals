@@ -1,4 +1,4 @@
-The zinc ion is visible in the center of the view.
-The three histidines that hold the zinc (His94, His96, His119) show as sticks.
-The view is zoomed on the active site, and the rest of the protein is muted.
-Waters are hidden, except a water bound to the zinc.
+5 The zinc ion is visible in the center of the view.
+2 The three histidines that hold the zinc (His94, His96, His119) show as sticks.
+2 The view is zoomed on the active site, and the rest of the protein is muted.
+1 Waters are hidden, except a water bound to the zinc.

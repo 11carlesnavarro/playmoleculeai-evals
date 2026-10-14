@@ -1,9 +1,12 @@
 """Viewer sidecar: the deployed PMView site in headless Chromium, for one trial.
 
-The browser opens the site (PMVIEW_URL) and logs in as the eval account. We have no PMView files or
-code. Playwright takes only two things away from the site:
+The browser opens the site (PMVIEW_URL) and logs in as the eval account. Playwright takes these
+things away from the site:
 - PMView's agent socket (/v3/agent/ws/...): PMView talks to this sidecar, not to the site's agent.
 - the trial project's files (/v3/file/<project>/...): the shared project folder, not the site's bucket.
+- the account's project list (/v3/prefixes): the site's list and the trial projects.
+- PMView itself, if the image has a PMView build (make viewer PMVIEW=<checkout>): the page, its
+  scripts and its Python come from the build; the backend (/v3/...) and config.js from the site.
 
 :9000  control, for the agent script and the tests: /healthz, /open?project=P, POST /python, /screenshot.
 /open also loads the task's structures (VIEWER_PRELOAD), as the agent loads them.
@@ -34,10 +37,12 @@ AGENT_WS = os.environ.get("AGENT_WS", "ws://localhost:8100/v1/ws/eval")
 PRELOAD = json.loads(os.environ.get("VIEWER_PRELOAD") or "{}")  # the task's start: {"pdb_ids", "files"}
 FILES = Path(os.environ.get("FILES_ROOT", "/files"))  # <project>/<path>, as in a backend bucket
 EVIDENCE = Path(os.environ.get("EVIDENCE_DIR", "/logs/artifacts/viewer"))
+BUILD = Path(os.environ.get("PMVIEW_BUILD", "/srv/pmview"))  # no index.html: PMView from the site
 READY_TIMEOUT = float(os.environ.get("READY_TIMEOUT", 300))  # SwiftShader, Pyodide from CDNs: slow
 PING_EVERY = 25  # PMView drops a socket with no message for 31 s
 CONNECT_TIMEOUT = 30  # as pmai: a command waits this long for PMView to connect
 COMMAND_TIMEOUT = 120  # as pmai
+READS = {"pmview_viewer_state", "pmview_screenshot"}  # pmai's commands that do not change the page
 WEBGL2 = """() => {
   const gl = document.createElement("canvas").getContext("webgl2");
   if (!gl) return null;
@@ -120,12 +125,15 @@ class Viewer:
                 if not answer.done():
                     answer.set_result(message)
             elif self.agent is not None:
+                tool = self.tools.pop(message.get("command_id"), None)
+                # a read leaves the page as it was: only the first command of the trial shows the start
+                shoot = self.shoot and not (tool in READS and self.shots)
+                shot = f"steps/{len(self.shots):03}.jpg" if shoot else None
                 # logged before pmai gets it, so before agent.db has the step: trajectory.py needs the order
-                shot = f"steps/{len(self.shots):03}.jpg"
-                log("pmai_result", tool=self.tools.pop(message.get("command_id"), None), shot=shot)
+                log("pmai_result", tool=tool, shot=shot)
                 with contextlib.suppress(ConnectionError):  # pmai exits: its command is gone with it
                     await self.agent.send_json(message)
-                if self.shoot:
+                if shot:
                     self.shots.append(asyncio.create_task(self.shoot(EVIDENCE / shot)))
 
 
@@ -206,6 +214,31 @@ async def project_files(route) -> None:
     await route.fulfill(json={})
 
 
+async def project_list(route) -> None:
+    """Playwright route for /v3/prefixes, the account's projects: the site's list and the trial projects.
+    PMView opens the account's default project when its project is not in this list."""
+    response = await route.fetch()
+    if not response.ok:
+        return await route.fulfill(response=response)
+    projects = await response.json()
+    trial = [p.name for p in FILES.iterdir() if p.is_dir() and p.name not in projects]
+    await route.fulfill(response=response, json=projects + trial)
+
+
+async def pmview_build(route) -> None:
+    """Playwright route for the whole site: PMView's files from BUILD. The backend (/v3/...), the
+    runtime config (config.js) and a file the build does not have come from the site."""
+    path = urllib.parse.unquote(urllib.parse.urlsplit(route.request.url).path).lstrip("/")
+    if path.startswith("v3/") or path == "config.js":
+        return await route.fallback()
+    file = (BUILD / path).resolve()
+    if not file.is_file() and "." not in path.rsplit("/", 1)[-1]:
+        file = BUILD / "index.html"  # an app route, or the site root
+    if not file.is_file() or not file.is_relative_to(BUILD.resolve()):
+        return await route.fallback()
+    await route.fulfill(path=file)
+
+
 # ---- the browser ---------------------------------------------------------------------------------
 
 
@@ -240,10 +273,14 @@ class Browser:
         chromium.on("disconnected", lambda _: self.fail("the browser is gone"))
         # no Playwright trace: it records the login form and the auth cookies
         # service workers blocked: a request that a service worker answers skips the routes
-        self.context = await chromium.new_context(viewport={"width": 1280, "height": 800},
+        # a QHD screen: the canvas (half the window) is wide enough for PMView to capture it as it is
+        self.context = await chromium.new_context(viewport={"width": 2560, "height": 1440},
                                                   service_workers="block")
+        if (BUILD / "index.html").is_file():  # first: the routes added later go before it
+            await self.context.route(f"{SITE}/**", pmview_build)
         await self.context.route_web_socket("**/v3/agent/ws/**", viewer.connect)
         await self.context.route("**/v3/file/**", project_files)
+        await self.context.route("**/v3/prefixes", project_list)
         self.page = page = await self.context.new_page()
         page.on("crash", lambda _: self.fail("the page crashed"))
         page.on("pageerror", lambda error: log("page_error", text=str(error)))
@@ -355,7 +392,9 @@ async def open_project(request: web.Request) -> web.Response:
         browser.fail(str(error) or repr(error))  # the tests then get a 503 too, not a viewer with no project
         raise web.HTTPServiceUnavailable(text=browser.broken) from error
     seconds = round(time.monotonic() - start, 1)
-    log("ready", project=project, seconds=seconds, site=SITE, scripts=scripts)
+    version = BUILD / "VERSION"  # make viewer writes it: the PMView commit of the build
+    pmview = version.read_text().strip() if version.is_file() else "the site's"
+    log("ready", project=project, seconds=seconds, site=SITE, pmview=pmview, scripts=scripts)
     return web.Response(text="ready")
 
 
@@ -372,7 +411,7 @@ async def tool(request: web.Request, tool_name: str, **arguments) -> dict:
 
 
 async def python(request: web.Request) -> web.Response:
-    """Body: code for PMView's Python, as the agent's pmview_run_python. Returns stdout, stderr, result."""
+    """Body: code for PMView's Python, as the agent's pmview_python. Returns stdout, stderr, result."""
     return web.json_response(await tool(request, "pmview_run_python", code=await request.text()))
 
 

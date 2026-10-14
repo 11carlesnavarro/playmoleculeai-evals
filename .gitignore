@@ -4,6 +4,8 @@
 # personal tooling (tracked skills stay tracked)
 .claude
 .codex
+.playwright-mcp/
+development/
 
 # python
 __pycache__/
@@ -18,3 +20,4 @@ dist/
 # harbor results (make run)
 results/
 
+docs/pep-talk/

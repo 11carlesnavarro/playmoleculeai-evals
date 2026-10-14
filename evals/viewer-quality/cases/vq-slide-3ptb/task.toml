@@ -1,4 +1,6 @@
 schema_version = "1.4"
+# the file that the prompt asks for, for the review
+artifacts = ["/app/figures/benzamidine.png"]
 
 [task]
 name = "acellera/vq-slide-3ptb"
@@ -9,9 +11,6 @@ source = "prod 3477, 3229"
 
 [agent]
 timeout_sec = 1800
-
-[verifier]
-timeout_sec = 600
 
 [environment]
 docker_image = "pmai-eval:latest"

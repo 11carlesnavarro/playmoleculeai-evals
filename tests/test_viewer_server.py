@@ -30,14 +30,14 @@ class FakePMView:
     def send(self, raw):
         self.seen.append(message := json.loads(raw))
         if message["type"] == "pmview_command":
-            output = {"stdout": f"ran {message['arguments']['code']}"}
+            output = {"stdout": f"ran {message['arguments'].get('code')}"}
             reply = json.dumps({**RESULT, "command_id": message["command_id"], "output": output})
             asyncio.get_running_loop().call_soon(self.answer, reply)
 
 
 def fake_pmai(got: asyncio.Queue, exited: asyncio.Event) -> web.Application:
-    """`pmai run --viewer-id eval`: sends one command. When it exits, it closes the socket and refuses
-    new ones."""
+    """`pmai run --viewer-id eval`: sends a command that changes the view, then one that reads it. When it
+    exits, it closes the socket and refuses new ones."""
 
     async def socket(request):
         if exited.is_set():
@@ -47,6 +47,8 @@ def fake_pmai(got: asyncio.Queue, exited: asyncio.Event) -> web.Application:
         await ws.send_json({"type": "ping"})
         command = {"tool_name": "pmview_run_python", "arguments": {"code": "agent"}, "chat_id": "c1"}
         await ws.send_json({"type": "pmview_command", **command, "command_id": "pmai-1"})
+        read = {"tool_name": "pmview_viewer_state", "arguments": {}, "chat_id": "c1"}
+        await ws.send_json({"type": "pmview_command", **read, "command_id": "pmai-2"})
 
         async def read():
             async for msg in ws:
@@ -117,12 +119,13 @@ def test_each_result_goes_to_its_sender(tmp_path):
             assert await asyncio.wait_for(got.get(), 5) == {"type": "pong"}
             result = await asyncio.wait_for(got.get(), 5)
             assert result == {**RESULT, "command_id": "pmai-1", "output": {"stdout": "ran agent"}}
+            assert (await asyncio.wait_for(got.get(), 5))["command_id"] == "pmai-2"
 
             s.viewer.connect(FakePMView())  # PMView reconnects: the new socket is used
             r = await s.control.post("/python", data="during the turn")
             assert await r.json() == {"stdout": "ran during the turn"}
             assert got.empty()  # the tests' result does not go to pmai
-            assert shots == [tmp_path / "steps/000.jpg"]  # pmai's command only
+            assert shots == [tmp_path / "steps/000.jpg"]  # pmai's command that changes the view only
 
             exited.set()  # pmai exits; the sidecar keeps PMView
             await until(lambda: s.viewer.agent is None)
@@ -135,6 +138,7 @@ def test_each_result_goes_to_its_sender(tmp_path):
     events = (tmp_path / "events.jsonl").read_text()
     assert "secret" not in events
     assert '"event": "pmai_result", "tool": "pmview_run_python", "shot": "steps/000.jpg"' in events
+    assert '"event": "pmai_result", "tool": "pmview_viewer_state", "shot": null' in events
 
 
 def test_shoots_only_a_changed_page(tmp_path, monkeypatch):
@@ -228,5 +232,52 @@ def test_project_files(tmp_path):
         assert await run("GET", f"{site}/app/none.pdb") == (404, None)
         assert await run("GET", f"{site}/other/a.pdb") == "site"  # not this trial's project
         assert await run("GET", f"{site}/app/%2e%2e/%2e%2e/secret") == (403, None)
+
+    asyncio.run(scenario())
+
+
+def test_pmview_build(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "BUILD", tmp_path)
+    (tmp_path / "index.html").write_bytes(b"page")
+    (tmp_path / "static/assets").mkdir(parents=True)
+    (tmp_path / "static/assets/utils.py").write_bytes(b"code")
+
+    async def run(path):
+        await server.pmview_build(route := FakeRoute("GET", f"https://site{path}"))
+        return route.done
+
+    async def scenario():
+        assert await run("/") == (200, b"page")
+        assert await run("/projects/abc") == (200, b"page")  # an app route
+        assert await run("/static/assets/utils.py?v=2") == (200, b"code")
+        assert await run("/static/assets/none.whl") == "site"
+        assert await run("/config.js") == "site"  # the site's runtime config
+        assert await run("/v3/auth/csrf") == "site"
+        assert await run("/%2e%2e/secret.txt") == "site"
+
+    asyncio.run(scenario())
+
+
+def test_project_list(tmp_path):
+    (tmp_path / "files/other").mkdir()
+
+    class ListRoute(FakeRoute):
+        def __init__(self, site):
+            super().__init__("GET", "https://site/v3/prefixes")
+            self.site = site
+
+        async def fetch(self):
+            return SimpleNamespace(ok=self.site is not None, json=lambda: asyncio.sleep(0, self.site))
+
+        async def fulfill(self, response=None, json=None):
+            self.done = json if response.ok else "site error"
+
+    async def run(site):
+        await server.project_list(route := ListRoute(site))
+        return route.done
+
+    async def scenario():
+        assert sorted(await run(["mine", "other"])) == ["app", "mine", "other"]  # each trial project once
+        assert await run(None) == "site error"  # passed on: PMView then keeps its project
 
     asyncio.run(scenario())

@@ -1,4 +1,4 @@
-Estradiol is visible: the surface does not hide it (cut away, transparent or clipped).
-A surface shows the shape of the pocket around estradiol.
-The view is zoomed on the pocket.
-Estradiol has a clear color, different from the surface.
+4 Estradiol is visible: the surface does not hide it (cut away, transparent or clipped).
+4 A surface shows the shape of the pocket around estradiol.
+1 The view is zoomed on the pocket.
+1 Estradiol has a clear color, different from the surface.

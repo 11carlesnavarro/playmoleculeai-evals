@@ -1,5 +1,5 @@
-Staurosporine (STU) is visible and not hidden by the protein.
-The residues within 4 Å show as full residues (sticks), not only some of their atoms.
-The highlighted residues are easy to tell apart from the rest of the protein.
-The camera is zoomed on the binding site.
-Waters are hidden.
+2 Staurosporine (STU) is visible and not hidden by the protein.
+4 The residues within 4 Å show as full residues (sticks), not only some of their atoms.
+2 The highlighted residues are easy to tell apart from the rest of the protein.
+1 The camera is zoomed on the binding site.
+1 Waters are hidden.

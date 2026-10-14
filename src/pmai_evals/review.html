@@ -1,0 +1,459 @@
+<title>PMAI Eval Review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<style>
+/* Layout: a review desk. Cases on the left, the result on a dark stage in the middle, the review sheet on the right. */
+:root {
+  --bg: #f4f5f7; --surface: #ffffff; --sunken: #eceef2; --fg: #14171c; --muted: #5f6877; --faint: #8f98a6; --line: #e1e4ea;
+  --accent: #2648c9; --accent-soft: #e7ecfb; --on-accent: #ffffff;
+  --ok: #17784a; --ok-soft: #e1f2e8; --bad: #bd3328; --bad-soft: #fbe5e2; --maybe: #9a6400; --maybe-soft: #f8eed6;
+  --stage: #111214; --stage-fg: #aab0ba;
+  --sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --t1: 11.5px; --t2: 12.5px; --t3: 14px; --t4: 15px; --t5: 20px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e1013; --surface: #16191e; --sunken: #1d2127; --fg: #e7e9ed; --muted: #a0a8b5; --faint: #6f7886; --line: #262b33;
+  --accent: #8aa4ff; --accent-soft: #1d2640; --on-accent: #0b1020;
+  --ok: #57c891; --ok-soft: #14291e; --bad: #f2847a; --bad-soft: #351b18; --maybe: #e3b24f; --maybe-soft: #2f250f;
+  color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0e1013; --surface: #16191e; --sunken: #1d2127; --fg: #e7e9ed; --muted: #a0a8b5; --faint: #6f7886; --line: #262b33;
+  --accent: #8aa4ff; --accent-soft: #1d2640; --on-accent: #0b1020;
+  --ok: #57c891; --ok-soft: #14291e; --bad: #f2847a; --bad-soft: #351b18; --maybe: #e3b24f; --maybe-soft: #2f250f;
+  color-scheme: dark }
+
+body { background: var(--bg); color: var(--fg); font: 400 var(--t3)/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+.app { max-width: 1560px; margin: 0 auto; padding-inline: 16px; padding-block: 12px 48px; display: grid; gap: 20px; }
+@media (min-width: 900px) { .app { padding-inline: 24px; } }
+h1, h2 { margin: 0; text-wrap: balance; }
+p { margin: 0; }
+button { font: inherit; color: inherit; cursor: pointer; background: none; border: 0; padding: 0; }
+:is(button, select, textarea, a, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.label { font-size: var(--t1); font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+.mono { font-family: var(--mono); }
+
+/* bar */
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; min-height: 48px; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+.brand { font-size: var(--t4); font-weight: 600; letter-spacing: -.01em; }
+.brand span { color: var(--faint); font-weight: 500; margin-right: 6px; }
+select { font: 500 var(--t2) var(--sans); color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; max-width: 100%; min-width: 0; }
+.spacer { flex: 1 1 auto; }
+.progress { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; font-size: var(--t2); color: var(--muted); font-variant-numeric: tabular-nums; }
+.progress b { color: var(--fg); font-weight: 600; }
+.meter { width: 96px; height: 4px; border-radius: 4px; background: var(--sunken); overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.banner { font-size: var(--t2); color: var(--muted); background: var(--sunken); border-radius: 8px; padding: 10px 14px; }
+
+/* desk */
+.desk { display: grid; grid-template-columns: 210px minmax(0, 1fr) 340px; gap: 28px; align-items: start; }
+@media (max-width: 1180px) { .desk { grid-template-columns: 190px minmax(0, 1fr); } .review { grid-column: 2; position: static; max-height: none; } }
+@media (max-width: 760px) { .desk { grid-template-columns: minmax(0, 1fr); gap: 20px; } .review { grid-column: 1; }
+  .cases { display: flex; overflow-x: auto; gap: 6px; padding-bottom: 4px; } .case { flex: 0 0 auto; } }
+
+/* cases */
+.cases { display: grid; gap: 1px; }
+.case { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0 10px; text-align: left; padding: 7px 10px; border-radius: 8px; border: 1px solid transparent; }
+.case:hover { background: var(--sunken); }
+.case[aria-current="true"] { background: var(--surface); border-color: var(--line); }
+.case .name { font: 500 var(--t2) var(--mono); overflow-wrap: anywhere; }
+.case .sub { font-size: var(--t1); color: var(--faint); grid-column: 1; }
+.case .mark { grid-row: 1 / 3; grid-column: 2; }
+.mark { display: inline-grid; place-items: center; font: 500 var(--t1) var(--mono); }
+.mark.todo { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--faint); }
+.mark.score { min-width: 22px; height: 22px; padding: 0 5px; border-radius: 11px; background: var(--ok-soft); color: var(--ok); }
+.mark.run { color: var(--maybe); }
+.mark.err { color: var(--bad); }
+
+/* result */
+.result { display: grid; gap: 22px; min-width: 0; }
+.head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; }
+.head h1 { font: 600 var(--t5)/1.25 var(--sans); letter-spacing: -.015em; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 4px; font-size: var(--t2); color: var(--muted); }
+.chip { font-size: var(--t1); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; color: var(--muted); }
+.chip.warn { border-color: transparent; background: var(--bad-soft); color: var(--bad); }
+.pager { display: flex; align-items: center; gap: 4px; font: var(--t2) var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.pager button { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); }
+.pager button:hover { background: var(--sunken); color: var(--fg); }
+.prompt { display: grid; gap: 6px; }
+.prompt p { font-size: var(--t4); max-width: 68ch; }
+.stage { margin: 0; background: var(--stage); border-radius: 12px; padding: 14px 14px 10px; display: grid; gap: 10px; }
+.stage img { display: block; margin: 0 auto; max-width: 100%; max-height: min(72vh, 780px); height: auto; border-radius: 4px; }
+.stage figcaption { display: flex; justify-content: space-between; gap: 12px; font-size: var(--t1); color: var(--stage-fg); }
+.stage a { color: var(--stage-fg); text-decoration: none; }
+.stage a:hover { color: #ffffff; }
+.strip { display: flex; gap: 10px; overflow-x: auto; padding: 2px 2px 6px; }
+.thumb { flex: 0 0 auto; display: grid; gap: 4px; justify-items: start; }
+.thumb img { display: block; height: 58px; width: auto; border-radius: 6px; background: var(--stage); outline: 2px solid transparent; outline-offset: 1px; }
+.thumb span { font-size: var(--t1); color: var(--faint); }
+.thumb[aria-pressed="true"] img { outline-color: var(--accent); }
+.thumb[aria-pressed="true"] span { color: var(--fg); }
+.prose { font-size: var(--t3); max-width: 70ch; display: grid; gap: 10px; }
+.prose > * { margin: 0; }
+.prose ul, .prose ol { padding-left: 20px; display: grid; gap: 4px; }
+.prose code { font: .92em var(--mono); background: var(--sunken); border-radius: 4px; padding: 1px 4px; }
+.prose pre { background: var(--sunken); border-radius: 8px; padding: 10px 12px; overflow-x: auto; }
+.prose pre code { background: none; padding: 0; }
+.prose h1, .prose h2, .prose h3 { font-size: var(--t4); font-weight: 600; }
+.prose table { border-collapse: collapse; font-size: var(--t2); display: block; overflow-x: auto; }
+.prose th, .prose td { border-bottom: 1px solid var(--line); padding: 4px 10px 4px 0; text-align: left; }
+.facts { display: flex; flex-wrap: wrap; gap: 12px 32px; margin: 0; padding: 14px 0; border-block: 1px solid var(--line); }
+.facts div { display: grid; gap: 2px; }
+.facts dt { font-size: var(--t1); color: var(--faint); }
+.facts dd { margin: 0; font: 500 var(--t3) var(--mono); font-variant-numeric: tabular-nums; }
+.trace summary { cursor: pointer; list-style: none; display: flex; gap: 8px; align-items: baseline; }
+.trace summary::-webkit-details-marker { display: none; }
+.trace summary::before { content: "›"; color: var(--faint); transition: transform .15s; display: inline-block; }
+.trace[open] summary::before { transform: rotate(90deg); }
+.calls { list-style: none; margin: 10px 0 0; padding: 0; font: var(--t2)/1.4 var(--mono); }
+.calls li { display: grid; grid-template-columns: 2.4em minmax(0, 150px) minmax(0, 1fr); gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.calls .n { color: var(--faint); text-align: right; }
+.calls .tool { color: var(--accent); overflow-wrap: anywhere; }
+.calls .arg { color: var(--muted); overflow-wrap: anywhere; }
+
+/* review */
+.review { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); max-height: calc(100vh - 24px); overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; display: grid; gap: 22px; }
+.rv-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.rv-head h2 { font-size: var(--t4); font-weight: 600; }
+.saved { font-size: var(--t1); color: var(--faint); }
+.saved.bad { color: var(--bad); }
+.items { margin-top: 2px; }
+.item { display: grid; grid-template-columns: 1.5em minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 12px 0; }
+.item + .item { border-top: 1px solid var(--line); }
+.item p { font-size: var(--t3); line-height: 1.45; }
+.pts { font: 600 var(--t3)/1.45 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.item[data-check="pass"] .pts { color: var(--ok); }
+.item[data-check="fail"] .pts { color: var(--faint); text-decoration: line-through; }
+.yn { display: grid; grid-template-columns: 34px 34px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.yn button { height: 30px; display: grid; place-items: center; color: var(--faint); }
+.yn button + button { border-left: 1px solid var(--line); }
+.yn button:hover { background: var(--sunken); color: var(--fg); }
+.yn svg { width: 14px; height: 14px; }
+.yn [data-v="pass"][aria-pressed="true"] { background: var(--ok); color: var(--on-accent); }
+.yn [data-v="fail"][aria-pressed="true"] { background: var(--bad); color: var(--on-accent); }
+.total { display: flex; justify-content: space-between; align-items: baseline; padding-top: 12px; border-top: 1.5px solid var(--fg); }
+.total output { font: 600 var(--t5) var(--mono); font-variant-numeric: tabular-nums; }
+.total small { font: 500 var(--t3) var(--mono); color: var(--faint); margin-left: 4px; }
+textarea { font: inherit; font-size: var(--t3); width: 100%; box-sizing: border-box; min-height: 92px; margin-top: 6px; padding: 10px 12px;
+  border: 1px solid transparent; border-radius: 10px; background: var(--sunken); color: var(--fg); resize: vertical; }
+textarea:focus { outline: none; border-color: var(--accent); background: var(--surface); }
+textarea::placeholder { color: var(--faint); }
+.next { height: 40px; border: 1px solid var(--line); border-radius: 10px; font-weight: 500; display: flex; align-items: center; justify-content: space-between; padding-inline: 14px; }
+.next .left { color: var(--faint); font-weight: 400; font-size: var(--t2); }
+.next:hover:not(:disabled) { background: var(--sunken); }
+.next:disabled { color: var(--faint); cursor: default; }
+@media (prefers-reduced-motion: reduce) { .trace summary::before { transition: none; } }
+</style>
+
+<div class="app">
+  <header class="bar">
+    <div class="brand"><span>PMAI</span>Eval Review</div>
+    <select id="run" aria-label="Run" hidden></select>
+    <div class="spacer"></div>
+    <div class="progress" id="progress"></div>
+  </header>
+  <p class="banner" id="banner" hidden></p>
+
+  <div class="desk" id="desk" hidden>
+    <nav class="cases" id="cases" aria-label="Cases"></nav>
+
+    <main class="result">
+      <div class="head">
+        <div><h1 id="title"></h1><div class="meta" id="meta"></div></div>
+        <div class="pager"><button id="prev" aria-label="Previous case" title="Key ←">‹</button><span id="pos"></span><button id="nextCase" aria-label="Next case" title="Key →">›</button></div>
+      </div>
+      <section class="prompt"><div class="label">Prompt</div><p id="prompt"></p></section>
+      <div id="media">
+        <figure class="stage"><img id="shot" alt=""><figcaption><span id="shotLabel"></span><a id="shotOpen" target="_blank" rel="noopener">Open ↗</a></figcaption></figure>
+        <div class="strip" id="strip"></div>
+      </div>
+      <section class="prompt"><div class="label">Answer</div><div class="prose" id="answer"></div></section>
+      <dl class="facts" id="facts"></dl>
+      <details class="trace" id="trace"><summary><span class="label">Trace</span><span class="label" id="traceCount"></span></summary><ol class="calls" id="calls"></ol></details>
+    </main>
+
+    <aside class="review" aria-label="Review">
+      <div class="rv-head"><h2>Review</h2><span class="saved" id="saved"></span></div>
+      <section>
+        <div class="label">Rubric</div>
+        <div class="items" id="items"></div>
+        <div class="total"><span class="label">Score</span><span><output id="score"></output><small>/ 10</small></span></div>
+      </section>
+      <section>
+        <label class="label" for="note">Note</label>
+        <textarea id="note" placeholder="What would make it better?"></textarea>
+      </section>
+      <button class="next" id="next" title="Key N"></button>
+    </aside>
+  </div>
+</div>
+
+<script>
+const ICON = {
+  pass: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg>',
+  fail: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
+};
+const $ = (id) => document.getElementById(id);
+const S = { db: null, runs: [], meta: null, data: null, idx: 0, ratings: {}, pending: {}, saving: {}, prefix: "" };
+const remember = {
+  get: (k) => { try { return JSON.parse(localStorage.getItem("review:" + k)); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem("review:" + k, JSON.stringify(v)); } catch { /* private view */ } },
+};
+
+function h(tag, attrs = {}, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === "text") n.textContent = v; else if (k === "html") n.innerHTML = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v === true ? "" : v);
+  }
+  n.append(...kids.filter((k) => k != null && k !== false));  // append: replaceChildren would wipe text/html
+  return n;
+}
+function fill(n, ...kids) { n.replaceChildren(...kids.filter((k) => k != null && k !== false)); return n; }
+const money = (x) => x == null ? "–" : "$" + x.toFixed(x < 0.01 ? 4 : 3);
+const dur = (s) => s == null ? "–" : s < 90 ? `${Math.round(s)} s` : `${(s / 60).toFixed(1)} min`;
+const when = (iso) => iso ? new Date(iso).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+const key = (c) => `${S.meta.run}__${c.case}`;
+const blank = (c) => ({ run: S.meta.run, eval: S.meta.eval, case: c.case, trial: c.trial, rubric: c.rubric,
+  checks: c.rubric.map(() => null), score: null, note: "" });
+const rating = (c) => S.ratings[key(c)] || blank(c);
+// the points of the yes lines, out of 10; null until each line is marked (same as review.py score)
+const scoreOf = (rubric, checks) => checks.length !== rubric.length || checks.includes(null) ? null :
+  Math.round(100 * rubric.reduce((a, x, i) => a + (checks[i] === "pass" ? x.points : 0), 0) /
+    rubric.reduce((a, x) => a + x.points, 0)) / 10;
+const reviewed = (c) => rating(c).score != null;
+const fmt = (x) => x == null ? "–" : Number.isInteger(x) ? String(x) : x.toFixed(1);
+const cases = () => S.data.cases;
+const current = () => cases()[S.idx];
+const base = (c) => `runs/${S.meta.run}/${c.case}/`;
+
+function say(text) { $("banner").hidden = !text; $("banner").textContent = text || ""; }
+
+/* runs */
+function renderPicker() {
+  const sel = $("run");
+  fill(sel, ...S.runs.map((r) => h("option", { value: r.run,
+    text: `${r.eval} · ${r.job} · ${when(r.started)} · ${r.model}${r.finished < r.cases ? ` · ${r.finished}/${r.cases} done` : ""}` })));
+  sel.hidden = !S.runs.length;
+  if (S.meta) sel.value = S.meta.run;
+}
+
+async function openRun(run) {
+  const meta = S.runs.find((r) => r.run === run);
+  if (!meta) return;
+  let data;
+  try {
+    const res = await fetch(`runs/${run}.json`);
+    if (!res.ok) throw new Error(res.status);
+    data = await res.json();
+  } catch {
+    say(`The files of run ${run} are not on this page. Ask Claude to publish the run again.`);
+    return;
+  }
+  say("");
+  S.meta = meta; S.data = data;
+  const names = data.cases.map((c) => c.case), first = names[0]?.match(/^[a-z]+-/)?.[0] || "";
+  S.prefix = first && names.every((n) => n.startsWith(first)) ? first : "";
+  const last = remember.get("case:" + run);
+  S.idx = Math.max(0, names.indexOf(last));
+  remember.set("run", run);
+  $("desk").hidden = false;
+  renderPicker(); renderProgress(); renderList(); renderCase();
+}
+
+function renderProgress() {
+  const cs = cases(), done = cs.filter(reviewed).map(rating);
+  const mean = done.length ? (done.reduce((a, r) => a + r.score, 0) / done.length).toFixed(1) : "–";
+  const cost = cs.reduce((a, c) => a + (c.cost_usd || 0), 0);
+  fill($("progress"),
+    h("span", {}, h("b", { text: done.length }), ` of ${cs.length} reviewed`),
+    h("span", { class: "meter", role: "presentation" }, h("i", { style: `width:${(100 * done.length) / cs.length}%` })),
+    h("span", {}, "mean ", h("b", { text: mean })),
+    h("span", {}, "cost ", h("b", { text: money(cost) })));
+}
+
+/* cases */
+function mark(c) {
+  const r = rating(c);
+  if (c.status === "running") return h("span", { class: "mark run", text: "running" });
+  if (r.score != null) return h("span", { class: "mark score", text: fmt(r.score) });
+  if (c.status === "error") return h("span", { class: "mark err", text: "error" });
+  return h("span", { class: "mark todo", title: "Not reviewed" });
+}
+
+function renderList() {
+  $("cases").replaceChildren(...cases().map((c, i) => h("button", {
+    class: "case", "aria-current": String(i === S.idx), onclick: () => go(i) },
+    h("span", { class: "name", text: c.case.slice(S.prefix.length) }),
+    h("span", { class: "sub", text: [c.tags[0], c.holdout ? "holdout" : null].filter(Boolean).join(" · ") }),
+    mark(c))));
+}
+
+function go(i) {
+  S.idx = (i + cases().length) % cases().length;
+  remember.set("case:" + S.meta.run, current().case);
+  renderList(); renderCase();
+  scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+}
+
+function show(c, view) {
+  const src = base(c) + view;
+  $("shot").src = src; $("shotOpen").href = src;
+  const image = c.images.find((x) => x.file === view);
+  $("shotLabel").textContent = image?.label === "Final view" ? "Final view · the result to review" : image?.label || view;
+  $("shot").alt = $("shotLabel").textContent;
+  for (const t of $("strip").children) t.setAttribute("aria-pressed", String(t.dataset.view === view));
+}
+
+function renderCase() {
+  const c = current();
+  $("title").textContent = c.case;
+  fill($("meta"), ...[
+    ...c.tags.map((t) => h("span", { text: t })),
+    c.holdout ? h("span", { class: "chip", text: "holdout" }) : null,
+    c.status === "running" ? h("span", { class: "chip", text: "still running" }) : null,
+    c.error ? h("span", { class: "chip warn", text: c.error }) : null]);
+  $("pos").textContent = `${S.idx + 1} / ${cases().length}`;
+  $("prompt").textContent = c.prompt;
+
+  const views = c.images.map((x) => [x.file, x.label === "Final view" ? "final" : x.label]);
+  $("media").hidden = !views.length;
+  $("strip").hidden = views.length < 2;
+  $("strip").replaceChildren(...views.map(([view, label]) => h("button", {
+    class: "thumb", "data-view": view, "aria-pressed": "false", onclick: () => show(c, view), "aria-label": `Show ${label}` },
+    h("img", { src: base(c) + view, alt: "", loading: "lazy" }),
+    h("span", { text: label }))));
+  if (views.length) show(c, views[0][0]);
+
+  const text = c.answer || "";
+  if (text && window.marked && window.DOMPurify) $("answer").innerHTML = DOMPurify.sanitize(marked.parse(text));
+  else $("answer").textContent = text || "No answer.";
+
+  const tests = Object.values(c.tests || {});
+  const viewerCalls = c.calls.filter((x) => x.name.startsWith("pmview")).length;
+  $("facts").replaceChildren(...[
+    ["Cost", money(c.cost_usd)], ["Agent time", dur(c.agent_seconds)],
+    ["Tool calls", c.calls.length + (viewerCalls ? ` · ${viewerCalls} viewer` : "")],
+    ["Screenshots seen", c.agent_screenshots],
+    ["Tests", tests.length ? `${tests.filter((v) => v >= 1).length}/${tests.length} pass` : "–"]].map(([k, v]) =>
+      h("div", {}, h("dt", { text: k }), h("dd", { text: String(v) }))));
+
+  $("traceCount").textContent = `${c.calls.length} tool calls`;
+  $("calls").replaceChildren(...c.calls.map((x, i) => h("li", {},
+    h("span", { class: "n", text: i + 1 }), h("span", { class: "tool", text: x.name }), h("span", { class: "arg", text: x.args }))));
+  renderReview();
+}
+
+/* review */
+function item(c, r, i) {
+  const line = c.rubric[i];
+  return h("div", { class: "item", "data-check": r.checks[i] },
+    h("span", { class: "pts", text: line.points, title: `${line.points} points` }), h("p", { text: line.text }),
+    h("div", { class: "yn", role: "group" }, ...[["pass", "Yes"], ["fail", "No"]].map(([v, word]) => h("button", {
+      "data-v": v, "aria-pressed": String(r.checks[i] === v), title: word, "aria-label": word, html: ICON[v],
+      onclick: () => edit(c, (d) => { d.checks[i] = d.checks[i] === v ? null : v; }) }))));
+}
+
+function renderReview() {
+  const c = current(), r = rating(c);
+  fill($("items"), ...c.rubric.map((_, i) => item(c, r, i)));
+  $("score").textContent = fmt(r.score);
+  if (document.activeElement !== $("note")) $("note").value = r.note || "";
+  const left = cases().filter((x) => x.status !== "running" && !reviewed(x)).length;
+  $("next").disabled = !left;
+  fill($("next"), left ? "Next →" : "All reviewed", left ? h("span", { class: "left", text: `${left} left` }) : null);
+}
+
+function nextToReview() {
+  const cs = cases();
+  for (let k = 1; k <= cs.length; k++) {
+    const i = (S.idx + k) % cs.length;
+    if (cs[i].status !== "running" && !reviewed(cs[i])) return go(i);
+  }
+}
+
+function edit(c, change) {
+  const r = structuredClone(rating(c));
+  r.rubric = c.rubric;  // the review keeps the rubric (and points) it was made with
+  if (r.checks.length !== c.rubric.length) r.checks = c.rubric.map((_, i) => r.checks[i] ?? null);
+  change(r);
+  r.score = scoreOf(c.rubric, r.checks);
+  S.ratings[key(c)] = r;
+  renderReview(); renderList(); renderProgress();
+  save(c, r);
+}
+
+let noteTimer;
+$("note").addEventListener("input", () => {
+  const c = current(), text = $("note").value;
+  clearTimeout(noteTimer);
+  noteTimer = setTimeout(() => edit(c, (d) => { d.note = text; }), 600);
+});
+
+// one write at a time per document: a newer edit waits for the write in flight, then goes once
+async function save(c, r) {
+  const id = key(c), out = $("saved");
+  if (!S.db) { out.className = "saved bad"; out.textContent = "Not saved"; return; }
+  S.pending[id] = r;
+  if (S.saving[id]) return;
+  S.saving[id] = true;
+  out.className = "saved"; out.textContent = "Saving…";
+  try {
+    while (S.pending[id]) {
+      const body = { ...S.pending[id], updated: new Date().toISOString() };
+      delete S.pending[id];
+      await S.db.collection("ratings").doc(id).set(body);
+    }
+    out.textContent = "Saved";
+  } catch (e) {
+    out.className = "saved bad";
+    out.textContent = e?.code === "invalid_argument" ? "You cannot change reviews here" : "Not saved, try again";
+  } finally { S.saving[id] = false; }
+}
+
+$("run").addEventListener("change", (e) => openRun(e.target.value));
+$("prev").addEventListener("click", () => go(S.idx - 1));
+$("nextCase").addEventListener("click", () => go(S.idx + 1));
+$("next").addEventListener("click", nextToReview);
+document.addEventListener("keydown", (e) => {
+  if (!S.data || e.target.closest("textarea, select, input") || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === "ArrowRight") go(S.idx + 1);
+  else if (e.key === "ArrowLeft") go(S.idx - 1);
+  else if (e.key === "n" || e.key === "N") nextToReview();
+  else return;
+  e.preventDefault();
+});
+
+// make review serves this page on the user's machine (review.py serve): the same two collections, from there
+const localDb = {
+  collection: (name) => ({
+    onSnapshot: (next, fail) => fetch(`api/${name}`).then((r) => r.json())
+      .then((docs) => next({ docs: docs.map((d) => ({ id: d.id, data: () => d.data })) }))
+      .catch(() => fail({ code: "unavailable" })),
+    doc: (id) => ({ set: (body) => fetch(`api/${name}/${id}`, { method: "PUT", body: JSON.stringify(body) })
+      .then((r) => { if (!r.ok) throw new Error(r.status); }) }),
+  }),
+};
+
+(async () => {
+  say("Loading the runs…");
+  const db = window.claude ? await window.claude.use?.("db") : localDb;
+  if (!db) { say("Open this page on claude.ai to review: the runs and the reviews are kept there."); return; }
+  S.db = db;
+  db.collection("runs").onSnapshot((snap) => {
+    S.runs = snap.docs.map((d) => d.data()).sort((a, b) => (b.started || "").localeCompare(a.started || ""));
+    if (!S.runs.length) { say("No run to review yet. Ask Claude to add a run: it collects results/<run> and publishes it here."); return; }
+    renderPicker();
+    if (!S.meta) openRun(S.runs.some((r) => r.run === remember.get("run")) ? remember.get("run") : S.runs[0].run);
+  }, (e) => say(`The run list stopped updating (${e.code}). Reload the page.`));
+  db.collection("ratings").onSnapshot((snap) => {
+    for (const d of snap.docs) if (!S.pending[d.id] && !S.saving[d.id]) S.ratings[d.id] = d.data();
+    if (S.data) { renderList(); renderProgress(); renderReview(); }
+  }, (e) => say(`Reviews stopped updating (${e.code}). Reload the page.`));
+})();
+</script>

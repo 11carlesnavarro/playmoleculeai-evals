@@ -1,0 +1,5 @@
+1 The acetazolamide on the zinc (AZM 701) is visible in the pocket.
+4 The contact residues show as sticks, with one label each.
+3 The labels are readable: they do not overlap each other or cover the inhibitor.
+1 The view is zoomed on the binding site.
+1 Waters are hidden.

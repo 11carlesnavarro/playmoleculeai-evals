@@ -17,7 +17,7 @@ INSERT INTO chats VALUES (1, 0), (2, 1);
 
 
 def agent_db(path):
-    call = {"type": "function_call", "name": "pmview_run_python", "call_id": "c1",
+    call = {"type": "function_call", "name": "pmview_python", "call_id": "c1",
             "arguments": json.dumps({"code": "Molecule('1crn').view()"})}
     output = {"type": "function_call_output", "call_id": "c1", "output": [
         {"type": "input_text", "text": "Code executed successfully."},
@@ -58,7 +58,7 @@ def test_write(tmp_path):
     user, call, done = out["steps"]  # no system reminder, no subagent
     assert (user["source"], user["message"]) == ("user", "Load 1CRN")
     assert call["reasoning_content"] == "Use the viewer."
-    assert call["tool_calls"] == [{"tool_call_id": "c1", "function_name": "pmview_run_python",
+    assert call["tool_calls"] == [{"tool_call_id": "c1", "function_name": "pmview_python",
                                    "arguments": {"code": "Molecule('1crn').view()"}}]
     parts = call["observation"]["results"][0]["content"]
     images = [p["source"]["path"] for p in parts if p["type"] == "image"]

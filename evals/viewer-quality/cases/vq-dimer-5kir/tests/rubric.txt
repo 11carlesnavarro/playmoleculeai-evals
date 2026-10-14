@@ -1,5 +1,5 @@
-Both chains and the ligands are visible, and the whole dimer fits in the view.
-One chain is blue (#4F8CFF) and the other is purple (#A855F7).
-The ligand is cyan (#22D3EE), shows as sticks (not only balls), and is easy to tell from the blue chain.
-The heme cofactors are still visible: nothing important was hidden.
-Waters are hidden.
+3 Both chains and the ligands are visible, and the whole dimer fits in the view.
+3 One chain is blue (#4F8CFF) and the other is purple (#A855F7).
+2 The ligand is cyan (#22D3EE), shows as sticks (not only balls), and is easy to tell from the blue chain.
+1 The heme cofactors are still visible: nothing important was hidden.
+1 Waters are hidden.

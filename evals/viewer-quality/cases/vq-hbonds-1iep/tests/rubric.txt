@@ -1,4 +1,4 @@
-Imatinib (STI) is fully visible in its pocket.
-The polar contacts (hydrogen bonds) show as lines or dashes between the ligand and the residues.
-The residues that make the contacts show as sticks, and you can tell which residue is which.
-The view is zoomed on one binding site, and it is not crowded by the second copy or by waters.
+2 Imatinib (STI) is fully visible in its pocket.
+5 The polar contacts (hydrogen bonds) show as lines or dashes between the ligand and the residues.
+2 The residues that make the contacts show as sticks, and you can tell which residue is which.
+1 The view is zoomed on one binding site, and it is not crowded by the second copy or by waters.

@@ -10,9 +10,6 @@ source = "prod 5497"
 [agent]
 timeout_sec = 1800
 
-[verifier]
-timeout_sec = 600
-
 [environment]
 docker_image = "pmai-eval:latest"
 network_mode = "public"

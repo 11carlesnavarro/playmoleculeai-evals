@@ -15,7 +15,6 @@ harbor run ──► trial container (pmai-eval image)
 ```text
 evals/                        WHAT we test: one folder per eval
 ├── viewer-quality/           the final PMView image, rated by hand (20 cases)
-├── acellera-bench/           40 cases from the old harness, graded by code
 └── smoke/                    one case: does a run work at all
     each eval has:
     ├── README.md             what it measures, how to run it, its status
@@ -33,7 +32,7 @@ src/pmai_evals/               the Python code
 ├── reward.py                 pytest plugin: one score per test, reward = mean
 ├── judge.py                  LLM judge for what code cannot check
 ├── trajectory.py             the trace in make view
-└── legacy.py                 the old checks.py functions (acellera-bench)
+└── review.py, review.html    human review: a run on the review page, and the reviews back
 scripts/                      watch.py (make watch), eval_account.py (the eval account)
 tests/                        unit tests (make test)
 docs/implementation-plan.md   the work list and the status
@@ -56,10 +55,28 @@ A run writes `results/<eval>-<job file>-<date>/`, with one folder for each trial
 ```text
 agent/events.jsonl                pmai's output as it runs (make watch reads it)
 agent/trajectory.json, images/    the trace in make view (written after the turn)
-artifacts/logs/artifacts/viewer/  viewer cases: final-view.png, steps/NNN.jpg, events.jsonl
-verifier/                         reward.json and the test output
+artifacts/logs/artifacts/viewer/  viewer cases: final-view.png (kept after the turn), steps/NNN.jpg, events.jsonl
+artifacts/<path>                  the files that task.toml lists in `artifacts`
+verifier/                         reward.json and the test output (none when the job turns the verifier off)
 result.json                       reward, cost, error (written at the end)
 ```
+
+## Human review
+
+`make review` opens the review page on this machine (port 8080, like `make view`: run one at a time, or set `PORT=`). It lists every run in `results/`. For each case it shows the prompt, the images of the trial (the final view first), the answer, cost, time, test scores and the tool calls. You mark each line of the case's `tests/rubric.txt` yes or no, like an exam: the score is the points of the yes lines, out of 10. A case with no rubric gets one line, "The result does what the prompt asks", worth 10. You can add a note. Each click is saved in `evals/<eval>/ratings/<run>.json`.
+
+The same page is also on claude.ai (https://claude.ai/artifact/HnJ572pU7neDbMSdmAUtnG, private to you), to review away from this machine. There Claude publishes the run and reads the reviews back:
+
+```bash
+uv run python -m pmai_evals.review collect results/<run> <dir>   # Claude publishes <dir> with the page
+uv run python -m pmai_evals.review export <dir of review docs>    # evals/<eval>/ratings/<run>.json + summary
+```
+
+In `make view`, the review score is the reward `human_reward` (score / 10): a column in Overview and Rollouts, and a Y axis in Pareto. The run's value is the mean of the reviewed trials only. Overview also shows each run's `cost_usd` and `minutes`. A job file can turn the verifier off (`verifier: {disable: true}`) when the eval has no score yet, as viewer-quality until its judge: then `make view` shows no verifier rewards for any of its runs.
+
+Harbor draws a Pareto chart inside one job, and each `make run` is a new job. So `make view` shows one job for each job file (for example `viewer-quality-train`), with all its runs in it: one row and one Pareto point for each run, named by the run's date (`pmai 10-08 14:56`). It builds these jobs in `results/.view/` each time it starts, from hard links to the runs' files (no space). Restart `make view` to see new trials; `make watch` follows a run live.
+
+`tests/rubric.txt`: what a good result shows, one `<points> <criterion>` a line, the points add up to 10. Give a crucial line many points (5 or 6): if it fails, the score is bad.
 
 ## A case
 
@@ -100,4 +117,4 @@ TRIAL_LOGS=/tmp/t/logs REWARD_JSON=/tmp/t/reward.json \
   uv run pytest evals/smoke/cases/hello-file/tests -q -p pmai_evals.reward && cat /tmp/t/reward.json
 ```
 
-To grade a Harbor trial again, set `TRIAL_LOGS=<trial>/agent`. A viewer task then reads the viewer snapshot in `<trial>/artifacts/logs/artifacts/viewer/snapshot/` and needs no viewer (old checks also need `uv run --with "moleculekit<1.12"`).
+To grade a Harbor trial again, set `TRIAL_LOGS=<trial>/agent`. A viewer task then reads the final view in `<trial>/artifacts/logs/artifacts/viewer/final-view.png` and needs no viewer.

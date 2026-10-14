@@ -2,9 +2,14 @@
 
 import shlex
 from pathlib import PurePosixPath
-from typing import Literal
+from typing import ClassVar, Literal
 
-from harbor.agents.installed.base import BaseInstalledAgent, with_prompt_template
+from harbor.agents.installed.base import (
+    BaseInstalledAgent,
+    ErrorPattern,
+    UnknownApiError,
+    with_prompt_template,
+)
 from harbor.agents.options import InstalledAgentOptions
 from pydantic import Field
 
@@ -20,6 +25,9 @@ try:
 except urllib.error.HTTPError as e:
     sys.exit(f"viewer /open: {e.code} {e.read().decode()}")
 ' "$VIEWER_URL/open?project=$(basename "$PWD")\""""
+# After the turn, also a failed one: the view as the user sees it, for the review (and a judge). A sidecar
+# that cannot answer stops the script: the trial is an error, not a case with no image.
+KEEP_VIEW = "PYTHONPATH=/opt /opt/grader/bin/python -c 'from pmai_evals import trial; trial.final_image()'"
 
 
 class PmaiOptions(InstalledAgentOptions):
@@ -34,6 +42,12 @@ class PmaiOptions(InstalledAgentOptions):
 
 class PmaiAgent(BaseInstalledAgent):
     options_model = PmaiOptions
+    # pmai's line for a model call that failed (provider error, rate limit, policy stop): the job files
+    # run such a trial again, and do not score the turn
+    ERROR_PATTERNS: ClassVar = [
+        *BaseInstalledAgent.ERROR_PATTERNS,
+        ErrorPattern(r"\[LLM_FAILED\].*", UnknownApiError),
+    ]
 
     @staticmethod
     def name() -> str:
@@ -79,7 +93,11 @@ if [ -n "${{VIEWER_URL:-}}" ]; then
 FLAGS="$FLAGS --viewer-id eval"
 fi
 pmai run $FLAGS --config {HOME} {model_flag} --output json \\
-  --prompt {shlex.quote(instruction)} > /logs/agent/events.jsonl
+  --prompt {shlex.quote(instruction)} > /logs/agent/events.jsonl || status=$?
+if [ -n "${{VIEWER_URL:-}}" ]; then
+{KEEP_VIEW}
+fi
+exit ${{status:-0}}
 """,
         )
 

@@ -31,7 +31,9 @@ The README has the map of the repo. Since 2026-10-08, each eval has one folder i
 - Phase 4: done. The eval account is `carles` (the user's account, `PM_EMAIL` in `.env`); `scripts/eval_account.py check` logs in on the dev backend.
 - Phase 5: `pmai run --viewer-id` is in playmoleculeAI. The sidecar opens the deployed PMView site; the image, the compose file, the agent script change and the `trial.py` viewer functions are done, with unit tests. The 5.8 try passed on computer19 against production, with one pmai turn (2026-10-07). 5.7: molecular-visualization is ported (10 tasks, preload, field adapter); the grading path passed against production with no model. `evals/acellera-bench/viewer.yaml` on Harbor (2026-10-08): mv-1jpz, mv-2ity and mv-7fab all reward 1.0, about $0.003 a turn. 5.9: the trace in `make view`. Next: the full set (10 tasks).
 - Viewer quality (2026-10-08): 20 cases in `evals/viewer-quality/cases`, from the trace mining. Next: the baseline run, then the user rates the images.
+- Human review (2026-10-08): `src/pmai_evals/review.py` and `review.html`, one review page for any eval run (README, "Human review"). The baseline viewer-quality run is on it.
 - New layout (2026-10-08): `tasks/` and `experiments/` became `evals/<eval>/cases/` and `evals/<eval>/*.yaml`; `image/`, `viewer/` and `config/` are in `docker/`; `jobs/` is `results/`. `eval_sets/` and the port scripts (`cases_to_tasks.py`, `legacy_test_case.py`, `compare_old.py`) are removed: they are in git history. Paths in the done phases below use the new names.
+- acellera-bench is removed (2026-10-13): its 50 cases with their old `checks.py`, `legacy.py` and its test. Its code checks gave 1.0 to views that nobody can read; viewer-quality grades the image. All of it is in git history (commit 16d8fca). The grader venv no longer installs pandas, rdkit and moleculekit, which only the old checks used. The phases below keep their old paths.
 - The old harness is removed. All of it is in `/fast_shared/users/carles/data/playmoleculeAIdata/evals-archive-2026-10-05/`:
   - `repo-before-cleanup.tar.gz`: the repo before the cleanup (old src, tests, scripts, mining, development, docs, playwright). Not in it: `.env`, `playwright/.auth`, `.venv`, `.git`, bixbench fixtures.
   - `runs/`: the old run results (34 GB), the baseline for phase 2.
@@ -328,7 +330,7 @@ The script opens the viewer only when `VIEWER_URL` is set: other tasks run as be
 
 ### 5.6 `trial.py`: the viewer through the agent's API (written)
 
-The first viewer read saves a snapshot of the viewer after the turn in `/logs/artifacts/viewer/snapshot/` (on the host: `<trial>/artifacts/logs/artifacts/viewer/snapshot/`): `state.json`, `selection.json` and `systems/<uuid>.cif` for each structure. The tests read the snapshot, so a later grade on the host (`TRIAL_LOGS=...`) needs no viewer `[checked]`. `viewer_python` and `viewer_screenshot` still use the live viewer. A system that PMView cannot write gives `systems/<uuid>.error`: only the checks that need it fail.
+Removed on 2026-10-14, when no test read the viewer any more (viewer-quality grades `final-view.png`): the first viewer read saves a snapshot of the viewer after the turn in `/logs/artifacts/viewer/snapshot/` (on the host: `<trial>/artifacts/logs/artifacts/viewer/snapshot/`): `state.json`, `selection.json` and `systems/<uuid>.cif` for each structure. The tests read the snapshot, so a later grade on the host (`TRIAL_LOGS=...`) needs no viewer `[checked]`. `viewer_python` and `viewer_screenshot` still use the live viewer. A system that PMView cannot write gives `systems/<uuid>.error`: only the checks that need it fail.
 
 | Old check reads | New, in `trial.py` | Through |
 |---|---|---|
@@ -410,8 +412,9 @@ For trials that are done: `uv run python -m pmai_evals.trajectory results/<job>/
 
 The old viewer tasks check the viewer state, so a view nobody can read still gets 1.0. This eval grades the final image: the viewport as the user sees it. Plan, with the trace mining: https://claude.ai/artifact/Jy2kpxN4vz6aAkGjhQZZYH (2026-10-08).
 
-- `evals/viewer-quality/cases/`: 20 cases from real chats (`[metadata] source` in each `task.toml`). Each prompt says to use the viewer. `tests/rubric.txt`: what a good image shows; line 1 is the gate.
-- The test saves the image: `trial.final_image()` -> `artifacts/logs/artifacts/viewer/final-view.png` (the sidecar's `/screenshot`, PMView's viewport screenshot). The reward says only that it was saved.
+- `evals/viewer-quality/cases/`: 20 cases from real chats (`[metadata] source` in each `task.toml`). Each prompt says to use the viewer. `tests/rubric.txt`: what a good image shows, one "<points> <criterion>" a line, 10 points in all; the score is the points of the yes lines.
+- After the turn, the agent wrapper keeps the image (`agent.py`, also after a failed turn): `trial.final_image()` -> `artifacts/logs/artifacts/viewer/final-view.png` (the sidecar's `/screenshot`, PMView's viewport screenshot). A file that the prompt asks for is a Harbor artifact in `task.toml`.
+- No score until the judge (2026-10-13): the job files turn the verifier off, and the cases have no tests. Harbor ends a run with a mean of 0.000; the score is `human_reward` in `make view`, which shows no verifier rewards for the runs of a job file with the verifier off (also the older runs, which had a reward 1.0 that said only "saved").
 - `evals/viewer-quality/train.yaml`: the 15 hill climbing cases. `evals/viewer-quality/holdout.yaml`: the 5 held-out cases (keyword `holdout`), only to check that a gain is real.
 - No trajectory case yet: one image cannot show that frames are aligned.
 

@@ -1,6 +1,14 @@
 # Viewer quality, the 5 held-out cases: not used to choose changes. Run them only to check that a gain is real.
 n_attempts: 1
 n_concurrent_trials: 3
+# A trial that the model provider stops (UnknownApiError: pmai's [LLM_FAILED]) runs once more
+retry:
+  max_retries: 1
+  include_exceptions: [UnknownApiError]
+# No score until the judge: the trial keeps the final view, and you rate it (make review).
+# At the end of a run, Harbor prints a mean of 0.000: no trial has a score.
+verifier:
+  disable: true
 datasets:
   - path: evals/viewer-quality/cases
     task_names: [vq-active-site-1ca2, vq-compare-d2d3, vq-contacts-1aq1, vq-dimer-5kir, vq-explain-1eve]

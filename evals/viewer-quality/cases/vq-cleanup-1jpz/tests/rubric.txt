@@ -1,5 +1,5 @@
-The heme is kept and visible.
-The fatty acid ligand (N-palmitoylglycine) is visible next to the heme.
-Waters are hidden.
-The view is zoomed on the heme pocket, and the rest of the protein is muted.
-The heme iron is easy to see.
+3 The heme is kept and visible.
+3 The fatty acid ligand (N-palmitoylglycine) is visible next to the heme.
+2 Waters are hidden.
+1 The view is zoomed on the heme pocket, and the rest of the protein is muted.
+1 The heme iron is easy to see.

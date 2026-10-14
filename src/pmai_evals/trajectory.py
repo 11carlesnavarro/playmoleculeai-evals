@@ -108,7 +108,7 @@ def _viewer_shots(trial_dir: Path) -> list[tuple[float, Path]]:
     if not events.exists():
         return []
     shots = [(e["t"], events.parent / e["shot"]) for e in map(json.loads, events.read_text().splitlines())
-             if e["event"] == "pmai_result"]
+             if e["event"] == "pmai_result" and e["shot"]]
     return [(t, shot) for t, shot in shots if shot.exists()]
 
 

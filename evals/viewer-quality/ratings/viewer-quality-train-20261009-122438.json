@@ -1,0 +1,522 @@
+[
+ {
+  "case": "vq-chains-4hhb",
+  "checks": [
+   "pass",
+   "fail",
+   "fail",
+   "pass"
+  ],
+  "eval": "viewer-quality",
+  "note": "why the fuck it uses this fucking big dots",
+  "rubric": [
+   {
+    "points": 4,
+    "text": "All four chains are visible, each in a distinct color."
+   },
+   {
+    "points": 4,
+    "text": "The four hemes are visible (sticks or spheres), not lost inside the cartoon."
+   },
+   {
+    "points": 1,
+    "text": "The heme color is clearly different from all chain colors."
+   },
+   {
+    "points": 1,
+    "text": "The whole tetramer fits in the view, and waters are hidden."
+   }
+  ],
+  "run": "viewer-quality-train-20261009-122438",
+  "score": 5,
+  "trial": "vq-chains-4hhb__Hsuky6g",
+  "updated": "2026-10-09T11:28:16.540Z"
+ },
+ {
+  "case": "vq-cleanup-1jpz",
+  "checks": [
+   "pass",
+   "fail",
+   "pass",
+   "pass",
+   "pass"
+  ],
+  "eval": "viewer-quality",
+  "note": "I don't like it tags always the things like HEM, it was clear it's the HEM. \nthe fatty acid is behind",
+  "rubric": [
+   {
+    "points": 3,
+    "text": "The heme is kept and visible."
+   },
+   {
+    "points": 3,
+    "text": "The fatty acid ligand (N-palmitoylglycine) is visible next to the heme."
+   },
+   {
+    "points": 2,
+    "text": "Waters are hidden."
+   },
+   {
+    "points": 1,
+    "text": "The view is zoomed on the heme pocket, and the rest of the protein is muted."
+   },
+   {
+    "points": 1,
+    "text": "The heme iron is easy to see."
+   }
+  ],
+  "run": "viewer-quality-train-20261009-122438",
+  "score": 7,
+  "trial": "vq-cleanup-1jpz__KokEpL3",
+  "updated": "2026-10-09T11:29:16.445Z"
+ },
+ {
+  "case": "vq-compare-vrk",
+  "checks": [
+   "fail",
+   "pass",
+   "fail",
+   "fail"
+  ],
+  "eval": "viewer-quality",
+  "note": "terrible, still using way too big ugly balls and sticks",
+  "rubric": [
+   {
+    "points": 4,
+    "text": "Both structures are visible and overlap well (aligned), not side by side or apart."
+   },
+   {
+    "points": 1,
+    "text": "The two proteins have two distinct colors."
+   },
+   {
+    "points": 4,
+    "text": "The differing pocket residues show as sticks and are easy to find."
+   },
+   {
+    "points": 1,
+    "text": "The view is zoomed on the ATP pocket, not on the whole proteins."
+   }
+  ],
+  "run": "viewer-quality-train-20261009-122438",
+  "score": 1,
+  "trial": "vq-compare-vrk__y6GXSXk",
+  "updated": "2026-10-09T11:29:53.288Z"
+ },
+ {
+  "case": "vq-covalent-6oim",
+  "checks": [
+   "pass",
+   "fail",
+   "fail",
+   "fail"
+  ],
+  "eval": "viewer-quality",
+  "note": "it's bad, all cluttered. the size too big. I don't know why it puts the colors all blue same as the protein for the licorice",
+  "rubric": [
+   {
+    "points": 3,
+    "text": "Sotorasib and Cys12 are both visible in the center, with nothing in front of them."
+   },
+   {
+    "points": 5,
+    "text": "The covalent bond from the ligand to the Cys12 sulfur is drawn and visible."
+   },
+   {
+    "points": 1,
+    "text": "Cys12 and the ligand are sticks with different carbon colors, and atoms are colored by element."
+   },
+   {
+    "points": 1,
+    "text": "No label covers the ligand, and the ligand color reads well on the dark background."
+   }
+  ],
+  "run": "viewer-quality-train-20261009-122438",
+  "score": 3,
+  "trial": "vq-covalent-6oim__aLz6VYr",
+  "updated": "2026-10-09T11:36:30.089Z"
+ },
+ {
+  "case": "vq-deepsite-7y5k",
+  "checks": [
+   "pass",
+   "fail",
+   "fail",
+   "pass"
+  ],
+  "eval": "viewer-quality",
+  "note": "",
+  "rubric": [
+   {
+    "points": 4,
+    "text": "The pocket map shows as an isosurface on the protein, as compact pockets, not one big cloud and not empty."
+   },
+   {
+    "points": 3,
+    "text": "The top-scoring pocket is in the center of the view."
+   },
+   {
+    "points": 2,
+    "text": "The protein around the top pocket is visible (sticks or surface), not hidden behind the map."
+   },
+   {
+    "points": 1,
+    "text": "The map and the protein are easy to tell apart."
+   }
+  ],
+  "run": "viewer-quality-train-20261009-122438",
+  "score": 5,
+  "trial": "vq-deepsite-7y5k__LDvzB84",
+  "updated": "2026-10-09T11:37:11.317Z"
+ },
+ {
+  "case": "vq-glycans-6vxx",
+  "checks": [
+   "pass",
+   "pass",
+   "fail",
+   "pass"
+  ],
+  "eval": "viewer-quality",
+  "note": "",
+  "rubric": [
+   {
+    "points": 2,
+    "text": "The whole trimer fits in the view."
+   },
+   {
+    "points": 6,
+    "text": "The glycans show in a color that stands out from the protein."
+   },
+   {
+    "points": 1,
+    "text": "The protein chains are calm (muted or soft colors), so the glycans read well."
+   },
+   {
+    "points": 1,
+    "text": "No waters or other clutter."
+   }
+  ],
+  "run": "viewer-quality-train-20261009-122438",
+  "score": 9,
+  "trial": "vq-glycans-6vxx__47FX5DR",
+  "updated": "2026-10-09T11:37:31.116Z"
+ },
+ {
+  "case": "vq-hbonds-1iep",
+  "checks": [
+   "pass",
+   "pass",
+   "fail",
+   "pass"
+  ],
+  "eval": "viewer-quality",
+  "note": "it would be fine but the tags cover the lines. I don't like these tags. also I would prefer another color for the lines and dashed",
+  "rubric": [
+   {
+    "points": 2,
+    "text": "Imatinib (STI) is fully visible in its pocket."
+   },
+   {
+    "points": 5,
+    "text": "The polar contacts (hydrogen bonds) show as lines or dashes between the ligand and the residues."
+   },
+   {
+    "points": 2,
+    "text": "The residues that make the contacts show as sticks, and you can tell which residue is which."
+   },
+   {
+    "points": 1,
+    "text": "The view is zoomed on one binding site, and it is not crowded by the second copy or by waters."
+   }
+  ],
+  "run": "viewer-quality-train-20261009-122438",
+  "score": 8,
+  "trial": "vq-hbonds-1iep__WJC98sz",
+  "updated": "2026-10-09T11:38:38.848Z"
+ },
+ {
+  "case": "vq-interface-1n8z",
+  "checks": [
+   "fail",
+   "pass",
+   "pass",
+   "fail",
+   "pass"
+  ],
+  "eval": "viewer-quality",
+  "note": "",
+  "rubric": [
+   {
+    "points": 3,
+    "text": "The interface between HER2 and the Fab is in the center and zoomed."
+   },
+   {
+    "points": 4,
+    "text": "Contact residues on both sides show as sticks."
+   },
+   {
+    "points": 1,
+    "text": "HER2 and the Fab have distinct colors."
+   },
+   {
+    "points": 1,
+    "text": "The contacts are readable (dashed lines or labels), not a pile of atoms."
+   },
+   {
+    "points": 1,
+    "text": "Glycans and waters do not cover the interface."
+   }
+  ],
+  "run": "viewer-quality-train-20261009-122438",
+  "score": 6,
+  "trial": "vq-interface-1n8z__Jp4cshc",
+  "updated": "2026-10-09T11:39:06.566Z"
+ },
+ {
+  "case": "vq-labels-6lu7",
+  "checks": [
+   "pass",
+   "pass",
+   "fail",
+   "pass",
+   "pass"
+  ],
+  "eval": "viewer-quality",
+  "note": "could be better rotated",
+  "rubric": [
+   {
+    "points": 1,
+    "text": "The N3 inhibitor (chain C) is visible in the pocket."
+   },
+   {
+    "points": 4,
+    "text": "The contact residues show as sticks, with one label each."
+   },
+   {
+    "points": 3,
+    "text": "The labels are readable: they do not overlap each other or cover the inhibitor."
+   },
+   {
+    "points": 1,
+    "text": "The view is zoomed on the binding site."
+   },
+   {
+    "points": 1,
+    "text": "Waters are hidden."
+   }
+  ],
+  "run": "viewer-quality-train-20261009-122438",
+  "score": 7,
+  "trial": "vq-labels-6lu7__dq98U96",
+  "updated": "2026-10-09T11:39:54.979Z"
+ },
+ {
+  "case": "vq-pocket-1hsg",
+  "checks": [
+   "fail",
+   "pass",
+   "pass",
+   "pass",
+   "pass"
+  ],
+  "eval": "viewer-quality",
+  "note": "",
+  "rubric": [
+   {
+    "points": 4,
+    "text": "MK1 is in the center of the view and fully visible: no cartoon, surface or atoms in front of it."
+   },
+   {
+    "points": 3,
+    "text": "The binding-site residues show as full residues (sticks), not only side chains or single atoms."
+   },
+   {
+    "points": 1,
+    "text": "The camera is close: the binding site fills most of the view."
+   },
+   {
+    "points": 1,
+    "text": "Waters are hidden, and the rest of the protein is muted (thin or light cartoon)."
+   },
+   {
+    "points": 1,
+    "text": "MK1 has a color clearly different from the protein, with its atoms colored by element."
+   }
+  ],
+  "run": "viewer-quality-train-20261009-122438",
+  "score": 6,
+  "trial": "vq-pocket-1hsg__nSCBqbw",
+  "updated": "2026-10-09T11:40:26.583Z"
+ },
+ {
+  "case": "vq-pocket-1m17",
+  "checks": [
+   "fail",
+   "pass",
+   "pass",
+   "pass",
+   "pass"
+  ],
+  "eval": "viewer-quality",
+  "note": "it's hidden behind the sticks",
+  "rubric": [
+   {
+    "points": 4,
+    "text": "Erlotinib (AQ4) is fully visible in the pocket, not hidden behind the protein."
+   },
+   {
+    "points": 2,
+    "text": "The view is zoomed on the ATP pocket, not on the whole kinase."
+   },
+   {
+    "points": 2,
+    "text": "The hinge residue Met769, which binds the quinazoline, shows as sticks."
+   },
+   {
+    "points": 1,
+    "text": "Other pocket residues near the inhibitor show as sticks, and the rest of the protein is muted."
+   },
+   {
+    "points": 1,
+    "text": "No waters or other objects cover the inhibitor."
+   }
+  ],
+  "run": "viewer-quality-train-20261009-122438",
+  "score": 6,
+  "trial": "vq-pocket-1m17__z2dxhqm",
+  "updated": "2026-10-09T11:41:33.201Z"
+ },
+ {
+  "case": "vq-poses-1iep",
+  "checks": [
+   "pass",
+   "fail",
+   "fail",
+   "pass"
+  ],
+  "eval": "viewer-quality",
+  "note": "it's better than before. But is still very cluttered, there are some protein atoms shown as sticks for some reason and is not yet well zoomed",
+  "rubric": [
+   {
+    "points": 4,
+    "text": "Only 5 poses and the crystal imatinib are shown, not all 20 poses."
+   },
+   {
+    "points": 3,
+    "text": "Each pose has its own color and thin sticks, and the crystal ligand stands out."
+   },
+   {
+    "points": 2,
+    "text": "The pocket is in view, and the protein does not hide the poses."
+   },
+   {
+    "points": 1,
+    "text": "Waters are hidden, and the view is not crowded."
+   }
+  ],
+  "run": "viewer-quality-train-20261009-122438",
+  "score": 5,
+  "trial": "vq-poses-1iep__XbvQ6in",
+  "updated": "2026-10-09T11:42:39.058Z"
+ },
+ {
+  "case": "vq-resistance-1m17",
+  "checks": [
+   "pass",
+   "fail",
+   "pass",
+   "pass"
+  ],
+  "eval": "viewer-quality",
+  "note": "could be shown better. I don't know why it shows the as so big balls. The angle is not perfect",
+  "rubric": [
+   {
+    "points": 5,
+    "text": "Thr790 and erlotinib are both visible and close together in the view."
+   },
+   {
+    "points": 3,
+    "text": "Thr790 is easy to find: sticks with a distinct color, or a label."
+   },
+   {
+    "points": 1,
+    "text": "Nothing is in front of the space between Thr790 and the inhibitor."
+   },
+   {
+    "points": 1,
+    "text": "The rest of the protein is muted, and waters are hidden."
+   }
+  ],
+  "run": "viewer-quality-train-20261009-122438",
+  "score": 7,
+  "trial": "vq-resistance-1m17__qjz9UmY",
+  "updated": "2026-10-09T11:43:36.302Z"
+ },
+ {
+  "case": "vq-slide-3ptb",
+  "checks": [
+   "pass",
+   "pass",
+   "pass",
+   "fail"
+  ],
+  "eval": "viewer-quality",
+  "note": "I wouldn't put that on a paper or slide",
+  "rubric": [
+   {
+    "points": 4,
+    "text": "Benzamidine is in the center and fully visible."
+   },
+   {
+    "points": 3,
+    "text": "Asp189 at the bottom of the S1 pocket shows as sticks, next to the benzamidine amidine group."
+   },
+   {
+    "points": 1,
+    "text": "The view is zoomed on the S1 pocket, and waters are hidden."
+   },
+   {
+    "points": 2,
+    "text": "The image is clean enough for a slide: few colors, no clutter."
+   }
+  ],
+  "run": "viewer-quality-train-20261009-122438",
+  "score": 8,
+  "trial": "vq-slide-3ptb__LPSMNq7",
+  "updated": "2026-10-09T11:44:36.115Z"
+ },
+ {
+  "case": "vq-surface-1a52",
+  "checks": [
+   "pass",
+   "fail",
+   "fail",
+   "pass"
+  ],
+  "eval": "viewer-quality",
+  "note": "",
+  "rubric": [
+   {
+    "points": 4,
+    "text": "Estradiol is visible: the surface does not hide it (cut away, transparent or clipped)."
+   },
+   {
+    "points": 4,
+    "text": "A surface shows the shape of the pocket around estradiol."
+   },
+   {
+    "points": 1,
+    "text": "The view is zoomed on the pocket."
+   },
+   {
+    "points": 1,
+    "text": "Estradiol has a clear color, different from the surface."
+   }
+  ],
+  "run": "viewer-quality-train-20261009-122438",
+  "score": 5,
+  "trial": "vq-surface-1a52__RuFmJ45",
+  "updated": "2026-10-09T11:44:53.898Z"
+ }
+]

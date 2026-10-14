@@ -1,4 +1,4 @@
-The whole trimer fits in the view.
-The glycans show in a color that stands out from the protein.
-The protein chains are calm (muted or soft colors), so the glycans read well.
-No waters or other clutter.
+2 The whole trimer fits in the view.
+6 The glycans show in a color that stands out from the protein.
+1 The protein chains are calm (muted or soft colors), so the glycans read well.
+1 No waters or other clutter.

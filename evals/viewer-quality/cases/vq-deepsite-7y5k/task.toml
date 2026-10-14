@@ -10,9 +10,6 @@ source = "prod 6166, open 3736"
 [agent]
 timeout_sec = 1800
 
-[verifier]
-timeout_sec = 600
-
 [environment]
 network_mode = "public"
 cpus = 2

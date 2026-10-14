@@ -1,4 +1,4 @@
-Donepezil (E20) is visible along the gorge, not hidden by the protein.
-Key aromatic residues of the gorge (Trp84 at the bottom, Trp279 at the entrance, Phe330) show as sticks.
-The camera looks along the gorge, so the ligand is not behind the protein surface.
-The rest of the protein is muted, and waters are hidden.
+4 Donepezil (E20) is visible along the gorge, not hidden by the protein.
+3 Key aromatic residues of the gorge (Trp84 at the bottom, Trp279 at the entrance, Phe330) show as sticks.
+2 The camera looks along the gorge, so the ligand is not behind the protein surface.
+1 The rest of the protein is muted, and waters are hidden.

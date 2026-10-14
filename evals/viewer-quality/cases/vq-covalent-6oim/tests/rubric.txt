@@ -1,5 +1,4 @@
-Sotorasib and Cys12 are both visible in the center, with nothing in front of them.
-The covalent bond from the ligand to the Cys12 sulfur is drawn and visible.
-Cys12 and the ligand are sticks with different carbon colors, and atoms are colored by element.
-No label covers the ligand, and the ligand color reads well on the dark background.
-The background is dark.
+3 Sotorasib and Cys12 are both visible in the center, with nothing in front of them.
+5 The covalent bond from the ligand to the Cys12 sulfur is drawn and visible.
+1 Cys12 and the ligand are sticks with different carbon colors, and atoms are colored by element.
+1 No label covers the ligand, and the ligand color reads well on the dark background.

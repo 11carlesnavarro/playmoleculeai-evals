@@ -59,7 +59,7 @@ def end(trial: Path) -> str:
     if result.get("exception_info"):
         return f"END   error: {result['exception_info'].get('exception_type')} (see {trial}/exception.txt)"
     rewards = (result.get("verifier_result") or {}).get("rewards") or {}
-    return f"END   reward {rewards.get('reward')}"
+    return f"END   reward {rewards['reward']}" if "reward" in rewards else "END   done (no score)"
 
 
 def main(job: Path) -> None:
@@ -76,7 +76,8 @@ def main(job: Path) -> None:
 
 
 if __name__ == "__main__":
-    newest = max(Path("results").iterdir(), key=lambda p: p.stat().st_mtime)
+    newest = max((p for p in Path("results").iterdir() if not p.name.startswith(".")),
+                 key=lambda p: p.stat().st_mtime)
     job = Path(sys.argv[1]) if len(sys.argv) > 1 else newest
     with contextlib.suppress(KeyboardInterrupt):
         main(job)

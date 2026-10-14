@@ -4,10 +4,11 @@ import os
 import shlex
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import yaml
 
-from pmai_evals.agent import PmaiAgent
+from pmai_evals.agent import KEEP_VIEW, PmaiAgent
 from test_trial import fake_viewer, make_db
 
 
@@ -33,7 +34,7 @@ def test_script(tmp_path):
     assert 'FLAGS="--backend local"' in s
     assert "--config /logs/agent/home --model gpt-6-luna --output json" in s
     assert shlex.quote("it's a 'quoted' prompt") in s
-    assert s.rstrip().endswith("> /logs/agent/events.jsonl")
+    assert "> /logs/agent/events.jsonl || status=$?" in s
 
 
 def test_viewer(tmp_path):
@@ -55,6 +56,33 @@ def test_viewer(tmp_path):
         routes["/open?project=p1"] = (503, b"no WebGL2: Mol* cannot draw")
         r = run(VIEWER_URL=url)
     assert (r.returncode, r.stdout, r.stderr) == (1, "", "viewer /open: 503 no WebGL2: Mol* cannot draw\n")
+
+
+def test_keeps_the_view(tmp_path):
+    """After the turn, also a failed one, a viewer task keeps the final view. The exit code stays pmai's."""
+    lines = run_script(tmp_path).splitlines()
+    start = next(i for i, x in enumerate(lines) if x.startswith("pmai run"))
+    block = "\n".join(["set -e", "pmai() { return 3; }", *lines[start:]])
+    block = block.replace(KEEP_VIEW, "echo kept").replace("/logs/agent/events.jsonl", str(tmp_path / "e"))
+
+    def run(**env):
+        env = {"PATH": os.environ["PATH"], **env}
+        return subprocess.run(["bash", "-c", block], env=env, text=True, capture_output=True)
+
+    for env, out in [({}, ""), ({"VIEWER_URL": "http://viewer"}, "kept\n")]:  # not a viewer task, then one
+        r = run(**env)
+        assert (r.returncode, r.stdout) == (3, out)
+
+
+def test_provider_stop_is_an_api_error(tmp_path):
+    """The glycans trial of round 6: OpenAI stopped the turn. An UnknownApiError: the job runs it again."""
+    out = ("Upgraded the config\n[LLM_FAILED] model=gpt-6-luna code=bio_policy message=This content was "
+           "flagged for possible biological risk.\n")
+    error = PmaiAgent(logs_dir=tmp_path)._classify_exec_error("pmai run", SimpleNamespace(
+        return_code=1, stdout=out, stderr=None))
+    assert type(error).__name__ == "UnknownApiError"
+    assert type(PmaiAgent(logs_dir=tmp_path)._classify_exec_error("pmai run", SimpleNamespace(
+        return_code=1, stdout="Traceback: KeyError", stderr=None))).__name__ == "NonZeroAgentExitCodeError"
 
 
 def test_no_model(tmp_path):
