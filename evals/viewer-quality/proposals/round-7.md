@@ -1,6 +1,6 @@
 # Round 7
 
-Status: applied (uncommitted) and tested on this host, not run. See Applied.
+Status: applied (uncommitted), run (`viewer-quality-train-20261014-115559`) and reviewed: mean 9.07. See Result.
 
 The agent works the viewer as a person does: it acts, it sees what the user sees, and each control it needs is one
 call. Python stays the way to act. Evidence: the round 6 traces (`round-6.md`, Result) and the dev, prod and open
@@ -83,3 +83,20 @@ PMAI is now in the worktree `playmoleculeAI-2-viewer-quality` (Makefile `PMAI`).
 - Eval: OpenAI's `[LLM_FAILED]` stop is an `UnknownApiError`, and the job runs that trial once more.
 
 Run, as slurmweb: `make image && make viewer && make run JOB=evals/viewer-quality/train.yaml` (about $0.4).
+
+## Result
+
+Mean 9.07 (round 6: 7.4, round 4: 8.33). 15/15 trials, no provider stop, $0.32. Agent time 3,989 s (round 6: 5,392 s);
+slide gives 1,326 s of the difference, and the other 14 trials did the same work as in round 6.
+
+- Better: covalent 0 → 10 (the bond is drawn), glycans 0 → 10 (no provider stop), chains 6 → 10, pocket-1m17 6 → 10,
+  slide 8 → 10 (white background), compare 6 → 9 (no labels).
+- Worse: labels-3hs4 9 → 7 (labels on the atoms), resistance 10 → 7 (a label nobody asked for, white text in a white
+  outline), poses 10 → 7 (the grey crystal ligand does not stand out on white; pose colours from the palette skill).
+- Same: deepsite 6. The agent cut a copy of the map to show the top pocket, so the view shows one pocket.
+- Changes: images to the model 131 → 91, no screenshot calls; a camera call in the same code as a new display worked in
+  all trials that made one; no guessed `pmv` names; hbonds drew `Interactions`, no fake molecule; labels nobody asked
+  for in 2 of 14 trials (round 6: 4).
+- Faults: `mol.view(name=..., hold=True)` loses the name (4 of 9 trials); a state read after a change in the same code
+  gives the old state (13 times in 11 trials); `print(mol.reps[i])` gives an address (11 times in 10 trials);
+  `Interactions` is not in the `reps.add` docstring. Causes and the next changes: `round-8.md`.

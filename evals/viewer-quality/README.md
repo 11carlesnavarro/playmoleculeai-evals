@@ -142,6 +142,9 @@ your score is `human_reward` in `make view`.
   returns the new view, `pmview_look`; `Interactions`, `pmv.visible`, `pmv.settings`.
 - 2026-10-14: round 7 applied and tested on this host, not run (`proposals/round-7.md`, Applied). PMAI comes from the
   worktree `playmoleculeAI-2-viewer-quality`. A provider stop runs the trial once more.
+- 2026-10-14: round 7 run `viewer-quality-train-20261014-115559` ($0.32, 15/15) and reviewed
+  (`ratings/viewer-quality-train-20261014-115559.json`): mean 9.07 / 10. Worse: labels-3hs4, resistance (labels), poses
+  (colours). deepsite still 6. Details in `proposals/round-7.md`, Result. Round 8 proposed (`proposals/round-8.md`).
 - 2026-10-13: no Harbor reward until the judge. The reward was 1.0 when the view was saved, so it said nothing. The
   job files turn the verifier off, the agent wrapper keeps the final view after the turn, vq-slide-3ptb lists its
   file as a Harbor artifact, and `make view` shows no verifier rewards for the runs of this eval (also the old ones).
