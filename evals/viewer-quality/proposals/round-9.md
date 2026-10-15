@@ -1,6 +1,6 @@
 # Round 9
 
-Status: proposed, not applied.
+Status: applied, run and reviewed: 9.2 (see Result). Your decision 1 is still open (`round-10.md`).
 
 ## Where we are
 
@@ -96,10 +96,11 @@ take the canvas as shown. The ratings before round 9 are of the cropped images.
    and the agent concluded "the rendering doesn't consider the camera targeting". In slide `full-hd` gave 756×569.
    Should the image after each change show the whole viewport? The saved screenshots would keep the crop. In round 5
    you rejected the screenshot changes, and that set included this one.
-2. **AGENT.md line 10** (reproducibility; still open). New evidence: covalent wrote a script and a figure that nobody
+2. **AGENT.md line 10** (reproducibility). Your answer: keep it as it is. New evidence: covalent wrote a script and a figure that nobody
    asked for (steps 30 to 34, 92 s): "I could still offer a reproducible file".
 3. **Measurement.** With one run per case, we cannot see a 1 point change. Options: 3 runs per case (about $1.10 a
-   round, 45 images for you to rate), or build the judge now and check it against your 134 ratings.
+   round, 45 images for you to rate), or build the judge now and check it against your 134 ratings. Your answer: 1 run
+   per case.
 
 ## Not now
 
@@ -116,3 +117,71 @@ take the canvas as shown. The ratings before round 9 are of the cropped images.
 
 Compare round 9 with round 8 by rubric line: the framing lines (interface, pocket-1hsg, compare, poses), the steps
 after a representation change, the camera errors, the state length, and the slide steps.
+
+## Applied
+
+- Change 1: PMView runs each batch of code changes with Mol*'s camera reset off when the view already shows something,
+  then sets the depth to the new scene. `pmview_load` and the app's own actions are not changed.
+- Change 2: `mol.focus` frames and keeps the depth. `pmv.settings(clip=...)` sets the cut, and focus keeps it until
+  `clip=False`. The skill text and the docstrings say so.
+- Change 3: `pmv.get_viewer_state()["camera"]`; mask selections as index ranges; `size_theme` at the style's default
+  leaves the state; `print(mol.reps[i])` works with a mask.
+- Change 4: `pmview_screenshot` and `view_image` give the model images with transparent pixels on white (PNG). The
+  saved file keeps its transparency. An image that Pillow cannot read goes on as it is.
+- Change 5: the sidecar's `/screenshot` asks PMView for the whole viewport (`autocrop=False`, a new argument of the
+  screenshot command; the default is the crop, as before). Rounds 6 to 8 rated PMView's cropped image; round 5 rated
+  the whole canvas.
+- Your decision 1 is open: the agent's own images are still cropped.
+
+Tested on this host (sidecar on port 8799 with the PMView build):
+
+| Test | Result |
+|---|---|
+| Focus on MK1, then add a cartoon and pocket sticks | camera the same before and after; depth 32.2 Å, the whole protein |
+| A new molecule in an empty view | framed by Mol*, target 1.9 Å from the mean of the protein atoms |
+| `pmview_load` of a second file | framed by Mol*, as before |
+| Focus, `clip=10`, a background and a rep change in one run | target on MK1 (0.8 Å from the center of its box), depth 10 Å |
+| pocket-1hsg, round 7's final code, cut 12.5 Å (about the old focus cut) and none | almost the same; a little more cartoon in front |
+| interface-1n8z, round 7's final code, cut 22.3 Å (the same estimate) and none | the same |
+| `get_viewer_state()["camera"]` | the camera of the result state |
+| A mask of 170 atoms (1HSG) | 363 characters, the same atoms back from the selection |
+| `print(mol.reps[i])` with a mask; update of that rep | works; still 7 reps, no copies |
+| State of 6 reps | no `size_theme` |
+| PMView's transparent screenshot through the PMAI helper | corner pixel (0, 0, 0, 0) becomes white |
+| Sidecar `/screenshot`, camera zoomed out | 1279 × 1437 (the canvas); PMView's crop gave 690 × 906 |
+
+PMAI tests pass (351). Evals `make test` and `make lint` pass. tsc and eslint errors are only in lines that were there
+before.
+
+Seen in the test: a cut set in one run stays for the next views, also after a new molecule. That is the documented
+behaviour.
+
+Run, as slurmweb: `make image && make viewer && make run JOB=evals/viewer-quality/train.yaml` (about $0.3 to $0.4).
+
+## Result
+
+Mean 9.2 on 15 cases, the best round so far (round 7: 9.07). On the 14 cases of round 8: 8.07 → 9.14, 7 better, 3
+worse, 4 the same (sign test p = 0.34, so it can be noise). This round grades the whole viewport; rounds 6 to 8 graded
+the crop. $0.22 (round 8: $0.36), agent time 2,342 s (4,038 s), 230 steps (284), 72 images to the agent (108).
+
+| Case | r8 → r9 | Cause (trace) |
+|---|---|---|
+| compare | 9 → 5 | Framed both whole domains from the first camera side. The pocket is 7 Å behind the domain centre, under cartoon at 0.40 and 0.55, with sticks in one flat colour. Model choice. Before its first image it spent 211 s aligning the two kinases by hand. |
+| pocket-1m17 | 9 → 6 | Kept a cartoon of the residues within 10 Å at 0.66: a strand crosses AQ4. Step 7: "issues with the cartoon obscuring the ligand", then no fix. The skill lists "transparent" as a cure. |
+| covalent | 10 → 9 | Drew MOV and Cys12 as one representation "so the deposited S-C bond is retained", so Cys12 took the ligand colour (round 8 the same). |
+| chains | 5 → 9 | The heme line still fails: orange between a coral and a gold chain. |
+| hbonds | 8 → 9 | The size line fails: its last image was a crop of 26% of the viewport, and it said "the ligand takes up a good portion of the view". |
+| interface | 6 → 10 | Change 2. Step 6 read "Focus does not cut the depth of the view" and focused on the interface (round 8 framed the whole complex to avoid the cut). |
+| deepsite, labels, pocket-1hsg, poses | +3 to +4 | Model variance (map level, whole residues, cartoon removed, line poses). |
+
+- Change 1 worked: camera moves without a camera call 3 → 0, `pmv.settings` calls 49 → 8, "unexpectedly changed the
+  camera" 2 → 0. covalent: 35 steps, 628 s → 17 steps, 195 s.
+- Change 2: `clip` calls 19 → 5; clip in the reasoning 44 steps → 25 (9 of them the map clip); labels lost its rework
+  of clipped labels (round 8: 17 steps, 340 s → 5 steps, 91 s).
+- Change 3: KeyError `camera` 4 → 0; state text mean 1,510 → 704 characters; `size_theme` in 95 of 97 states → 2 of 65.
+- Change 4 did not run: no trial saved a transparent image.
+- Change 1 showed an old PMView bug: `pmview_load` of an SDF with several entries into an empty view is not framed
+  (blank image in rounds 8 and 9; seen again on this host). poses then drew 1IEP off screen (1 step).
+- Cost: slide −$0.067 (60 → 28 steps, model choices), covalent −$0.038, labels −$0.027.
+
+Next: `round-10.md`.

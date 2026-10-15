@@ -416,7 +416,10 @@ async def python(request: web.Request) -> web.Response:
 
 
 async def screenshot(request: web.Request) -> web.Response:
-    output = await tool(request, "pmview_screenshot", transparent=False, resolution="viewport")
+    """The whole viewport, as the user sees it: PMView's own screenshot crops the empty margins."""
+    output = await tool(
+        request, "pmview_screenshot", transparent=False, resolution="viewport", autocrop=False
+    )
     if not output.get("success"):
         raise web.HTTPBadGateway(text=f"pmview_screenshot: {output.get('error')}")
     png = base64.b64decode(output["fileContent"].split(",", 1)[-1])  # a data URI

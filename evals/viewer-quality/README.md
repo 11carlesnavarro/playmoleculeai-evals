@@ -151,6 +151,14 @@ your score is `human_reward` in `make view`.
 - 2026-10-14: round 8 run `viewer-quality-train-20261014-150617` ($0.36, 15/15) and reviewed
   (`ratings/viewer-quality-train-20261014-150617.json`): mean 8.07 on 14 cases (round 7: 9.0 on the same 14; p = 0.29,
   can be noise). Details in `proposals/round-8.md`, Result. Round 9 proposed (`proposals/round-9.md`).
+- 2026-10-14: round 9 applied and tested on this host, not run (`proposals/round-9.md`, Applied): code keeps the
+  camera, focus frames and `clip` cuts, the camera in `get_viewer_state()`, index ranges, transparent images on white.
+  The final view is now the whole viewport (rounds 6 to 8 rated cropped images). The round 8 state is committed in the
+  four repos.
+- 2026-10-15: round 9 run `viewer-quality-train-20261014-192525` ($0.22, 17 min, 15/15, all final views the whole canvas
+  1279 × 1437) and reviewed (`ratings/viewer-quality-train-20261014-192525.json`): mean 9.2, the best round (round 8 on
+  the same 14 cases: 8.07; p = 0.34). Worse: compare, pocket-1m17, covalent. Details in `proposals/round-9.md`, Result.
+  Round 10 proposed (`proposals/round-10.md`).
 - 2026-10-13: no Harbor reward until the judge. The reward was 1.0 when the view was saved, so it said nothing. The
   job files turn the verifier off, the agent wrapper keeps the final view after the turn, vq-slide-3ptb lists its
   file as a Harbor artifact, and `make view` shows no verifier rewards for the runs of this eval (also the old ones).
