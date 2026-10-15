@@ -35,7 +35,7 @@ agent_tiers:
   mega: gpt-6.1-sol
   kilo: glm-5.3-flash
 
-# Not here: playmolecule (docker/configs/pm adds it, phase 6), codebase_search and literature.
+# Not here: playmolecule (no eval runs PlayMolecule jobs yet), codebase_search and literature.
 # The last two start, but their tools fail in the container: no SEARCH_URL service, no literature data.
 plugins:
   skills:

@@ -1,6 +1,7 @@
 """docker/viewer/server.py with a fake PMView socket and a fake pmai: no browser."""
 
 import asyncio
+import base64
 import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -17,12 +18,12 @@ RESULT = {"type": "pmview_result"}
 
 class FakePMView:
     """What Playwright gives for PMView's agent socket (a WebSocketRoute): PMView runs each command
-    at once and answers."""
+    at once and answers. replies: tool name -> the result's fields; else it runs the code."""
 
     url = "wss://site/v3/agent/ws/tab?csrf_token=secret"
 
-    def __init__(self):
-        self.seen = []
+    def __init__(self, **replies):
+        self.seen, self.replies = [], replies
 
     def on_message(self, handler):
         self.answer = handler
@@ -30,9 +31,10 @@ class FakePMView:
     def send(self, raw):
         self.seen.append(message := json.loads(raw))
         if message["type"] == "pmview_command":
-            output = {"stdout": f"ran {message['arguments'].get('code')}"}
-            reply = json.dumps({**RESULT, "command_id": message["command_id"], "output": output})
-            asyncio.get_running_loop().call_soon(self.answer, reply)
+            ran = {"output": {"stdout": f"ran {message['arguments'].get('code')}"}}
+            reply = {**RESULT, "command_id": message["command_id"]}
+            reply |= self.replies.get(message["tool_name"], ran)
+            asyncio.get_running_loop().call_soon(self.answer, json.dumps(reply))
 
 
 def fake_pmai(got: asyncio.Queue, exited: asyncio.Event) -> web.Application:
@@ -69,7 +71,7 @@ def fake_pmai(got: asyncio.Queue, exited: asyncio.Event) -> web.Application:
 async def sidecar():
     viewer, browser = server.Viewer(), server.Browser()
     browser.started.set()
-    async with aiohttp.ClientSession() as http:
+    async with asyncio.timeout(10), aiohttp.ClientSession() as http:  # a hang fails the test
         control = TestClient(TestServer(server.control_app(viewer, browser)))
         await control.start_server()
         tasks = [asyncio.create_task(server.keepalive(viewer)), asyncio.create_task(viewer.from_pmview())]
@@ -135,10 +137,10 @@ def test_each_result_goes_to_its_sender(tmp_path):
             await pmai.close()
 
     asyncio.run(scenario())
-    events = (tmp_path / "events.jsonl").read_text()
-    assert "secret" not in events
-    assert '"event": "pmai_result", "tool": "pmview_run_python", "shot": "steps/000.jpg"' in events
-    assert '"event": "pmai_result", "tool": "pmview_viewer_state", "shot": null' in events
+    events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+    assert "secret" not in str(events)
+    assert [(e["tool"], e["shot"]) for e in events if e["event"] == "pmai_result"] == [
+        ("pmview_run_python", "steps/000.jpg"), ("pmview_viewer_state", None)]
 
 
 def test_shoots_only_a_changed_page(tmp_path, monkeypatch):
@@ -175,26 +177,43 @@ def test_no_pmview_is_an_infra_error(monkeypatch):
     asyncio.run(scenario())
 
 
+def test_control_api():
+    """/open waits until PMView runs Python. /screenshot gives PMView's data URI as PNG. A PMView tool
+    that fails is a 502: the test fails, the trial is not an infra error."""
+    png = "data:image/png;base64," + base64.b64encode(b"PNG").decode()
+
+    async def scenario():
+        async with sidecar() as s:
+            s.viewer.connect(pmview := FakePMView(
+                pmview_screenshot={"output": {"success": True, "fileContent": png}}))
+            s.browser.open = lambda project: asyncio.sleep(0)
+            s.browser.page = SimpleNamespace(evaluate=lambda script: asyncio.sleep(0, ["main.js"]))
+            r = await s.control.get("/open", params={"project": "app"})
+            assert (r.status, await r.text()) == (200, "ready")
+            r = await s.control.get("/screenshot")
+            assert (r.status, await r.read()) == (200, b"PNG")
+
+            pmview.replies["pmview_screenshot"] = {"output": {"success": False, "error": "no canvas"}}
+            r = await s.control.get("/screenshot")
+            assert (r.status, await r.text()) == (502, "pmview_screenshot: no canvas")
+            pmview.replies["pmview_run_python"] = {"error": "Pyodide crashed"}
+            r = await s.control.post("/python", data="1")
+            assert (r.status, await r.text()) == (502, "pmview_run_python: Pyodide crashed")
+
+    asyncio.run(scenario())
+
+
 def test_preload(monkeypatch):
-    monkeypatch.setattr(server, "PRELOAD", {"pdb_ids": ["1JPZ"], "files": ["pseudo_oxo.pdb"]})
+    monkeypatch.setattr(server, "PRELOAD", {"pdb_ids": ["1JPZ"]})
 
     async def scenario(stdout):
         async with sidecar() as s:
-            s.viewer.connect(pmview := FakePMView())
-
-            def answer(raw):  # as PMView answers: the code's output, not the code
-                pmview.seen.append(message := json.loads(raw))
-                output = {"stdout": stdout} if "code" in message["arguments"] else {"success": True}
-                reply = json.dumps({**RESULT, "command_id": message["command_id"], "output": output})
-                asyncio.get_running_loop().call_soon(pmview.answer, reply)
-
-            pmview.send = answer
+            s.viewer.connect(pmview := FakePMView(pmview_run_python={"output": {"stdout": stdout}}))
             await server.preload(s.viewer)
             return [(m["tool_name"], m["arguments"]) for m in pmview.seen]
 
     assert asyncio.run(scenario("Downloading 1JPZ\nloaded\n")) == [
         ("pmview_run_python", {"code": "Molecule('1JPZ').view()\nprint('loaded')"}),
-        ("pmview_load", {"files": ["pseudo_oxo.pdb"], "overwrite": True}),
     ]
     with pytest.raises(server.Unavailable, match="preload 1JPZ"):  # Molecule failed: no "loaded" line
         asyncio.run(scenario(""))
@@ -237,10 +256,12 @@ def test_project_files(tmp_path):
 
 
 def test_pmview_build(tmp_path, monkeypatch):
-    monkeypatch.setattr(server, "BUILD", tmp_path)
-    (tmp_path / "index.html").write_bytes(b"page")
-    (tmp_path / "static/assets").mkdir(parents=True)
-    (tmp_path / "static/assets/utils.py").write_bytes(b"code")
+    build = tmp_path / "build"
+    monkeypatch.setattr(server, "BUILD", build)
+    (build / "static/assets").mkdir(parents=True)
+    (build / "index.html").write_bytes(b"page")
+    (build / "static/assets/utils.py").write_bytes(b"code")
+    (tmp_path / "secret.txt").write_bytes(b"secret")  # next to the build: never served
 
     async def run(path):
         await server.pmview_build(route := FakeRoute("GET", f"https://site{path}"))

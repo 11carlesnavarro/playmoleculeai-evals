@@ -29,7 +29,7 @@ from harbor.models.trajectories import (
 
 from pmai_evals import trial
 
-VIEWER = "artifacts/logs/artifacts/viewer"  # the sidecar's evidence, in the trial folder
+VIEWER = f"{trial.HOST_ARTIFACTS}/viewer"  # the sidecar's evidence, in the trial folder
 
 
 def write(agent_dir: Path, name: str, version: str | None, model: str | None) -> Path:
@@ -52,7 +52,7 @@ def write(agent_dir: Path, name: str, version: str | None, model: str | None) ->
         for item in items:
             if item.get("type") == "message" and item.get("role") == "user":
                 steps.append(Step(step_id=len(steps) + 1, timestamp=when.isoformat(), source="user",
-                                  message=_text(item.get("content"))))
+                                  message=trial.text(item.get("content"))))
         calls = [i for i in items if i.get("type") == "function_call"]
         results = [ObservationResult(source_call_id=i["call_id"], content=_content(i.get("output"), images,
                                                                                     i["call_id"]))
@@ -73,7 +73,7 @@ def write(agent_dir: Path, name: str, version: str | None, model: str | None) ->
                 results.append(ObservationResult(content=pages))
         reasoning = "\n\n".join(s.get("text", "") for i in items if i.get("type") == "reasoning"
                                 for s in i.get("summary") or [])
-        said = "".join(_text(i.get("content")) for i in items
+        said = "".join(trial.text(i.get("content")) for i in items
                        if i.get("type") == "message" and i.get("role") == "assistant")
         if not (calls or reasoning or said):
             continue
@@ -110,10 +110,6 @@ def _viewer_shots(trial_dir: Path) -> list[tuple[float, Path]]:
     shots = [(e["t"], events.parent / e["shot"]) for e in map(json.loads, events.read_text().splitlines())
              if e["event"] == "pmai_result" and e["shot"]]
     return [(t, shot) for t, shot in shots if shot.exists()]
-
-
-def _text(content) -> str:
-    return content if isinstance(content, str) else "".join(p.get("text", "") for p in content or [])
 
 
 def _content(output, images: Path, call_id: str) -> str | list[ContentPart]:

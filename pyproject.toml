@@ -8,12 +8,13 @@ license = { text = "Proprietary" }
 authors = [{ name = "Carles Navarro" }]
 dependencies = [
     "harbor==0.24.0",  # 0.x moves fast: read the changelog before an upgrade
+    "pyyaml",  # review.py reads the job files
 ]
 
 [dependency-groups]
 dev = [
     "aiohttp>=3.10",  # docker/viewer/server.py runs in the viewer image; the host needs it for tests only
-    "anthropic>=0.39",  # judge.py runs in the image; the host needs it for tests only
+    "openai>=2.0",  # judge.py runs in the image (grader venv); the host needs it for tests only
     "pytest>=8.3",
     "ruff>=0.6",
 ]

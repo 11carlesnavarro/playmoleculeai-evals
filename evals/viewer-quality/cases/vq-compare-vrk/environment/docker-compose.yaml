@@ -15,8 +15,8 @@ services:
       PMVIEW_URL:  # the site that serves PMView; not set: the default in server.py
       PM_EMAIL: ${PM_EMAIL:?set it in .env}
       PM_PASSWORD: ${PM_PASSWORD:?set it in .env}
-      AGENT_WS: ws://main:8100/v1/ws/eval  # port: the pmai config (docker/configs/*), id: --viewer-id in agent.py
-      VIEWER_PRELOAD: ${VIEWER_PRELOAD:-}  # {"pdb_ids": [...], "files": [...]} in the viewer before the turn
+      AGENT_WS: ws://main:8100/v1/ws/eval  # port: docker/agent_config.yaml, id: --viewer-id in agent.py
+      VIEWER_PRELOAD: ${VIEWER_PRELOAD:-}  # {"pdb_ids": [...]}: in the viewer before the turn
     volumes:
       - project:/files/app
       - ${HOST_ARTIFACTS_PATH:?Harbor sets it}:/logs/artifacts  # events.jsonl and final.png

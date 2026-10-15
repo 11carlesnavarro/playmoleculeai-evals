@@ -1,5 +1,6 @@
 """What a test can ask about a finished trial. Stdlib only: it runs in the grader venv and on the host."""
 
+import atexit
 import json
 import os
 import re
@@ -18,8 +19,8 @@ DB = LOGS / "home" / "agent.db"
 _work = LOGS / "work_dir"
 WORK = Path(_work.read_text().strip()) if _work.exists() else Path("/app")
 VIEWER = os.environ.get("VIEWER_URL")  # viewer tasks only: docker/viewer/compose.yaml sets it
-# /logs/artifacts: Harbor keeps it on the host at <trial>/artifacts/logs/artifacts
-ARTIFACTS = LOGS.parent / ("artifacts" if Path("/logs/agent") == LOGS else "artifacts/logs/artifacts")
+HOST_ARTIFACTS = "artifacts/logs/artifacts"  # /logs/artifacts in the trial folder on the host
+ARTIFACTS = LOGS.parent / ("artifacts" if Path("/logs/agent") == LOGS else HOST_ARTIFACTS)
 FINAL_VIEW = ARTIFACTS / "viewer" / "final-view.png"  # next to the sidecar's evidence
 
 
@@ -30,6 +31,7 @@ def _readable(db: Path) -> Path:
     if os.access(db.parent, os.W_OK):
         return db
     tmp = Path(tempfile.mkdtemp(prefix="trial-db-"))
+    atexit.register(shutil.rmtree, tmp, True)
     for f in (db, db.with_name(db.name + "-wal")):  # the WAL holds what a killed agent did not checkpoint
         if f.exists():
             shutil.copy(f, tmp)
@@ -37,7 +39,7 @@ def _readable(db: Path) -> Path:
 
 
 def q(sql: str, *args, db: Path | None = None) -> list[tuple]:
-    con = sqlite3.connect(f"file:{_readable(db or DB)}?mode=ro", uri=True)
+    con = sqlite3.connect(f"{_readable(db or DB).resolve().as_uri()}?mode=ro", uri=True)
     try:
         return con.execute(sql, args).fetchall()
     finally:
@@ -50,9 +52,14 @@ def items(main_only: bool = True) -> list[dict]:
     return [json.loads(r[0]) for r in rows]
 
 
+def text(content) -> str:
+    """The text of a message: its content is a string or a list of parts."""
+    return content if isinstance(content, str) else "".join(p.get("text", "") for p in content or [])
+
+
 def answer() -> str:
     said = [i for i in items() if i.get("role") == "assistant"]
-    return "".join(p.get("text", "") for p in said[-1]["content"]) if said else ""
+    return text(said[-1]["content"]) if said else ""
 
 
 def tag(name: str = "answer") -> str | None:  # <answer>1.40</answer>
@@ -71,10 +78,6 @@ def tool_errors() -> list[tuple]:
     )
 
 
-def read_skill(name: str) -> bool:
-    return any(f"skills/{name}/SKILL.md" in c["arguments"] for c in tool_calls())
-
-
 def usage(db: Path | None = None) -> dict:
     rows = q("SELECT usage, cost_usd FROM usage_records", db=db)
     u = [json.loads(r[0] or "{}") for r in rows]
@@ -84,10 +87,6 @@ def usage(db: Path | None = None) -> dict:
         "output_tokens": sum(x.get("output_tokens", 0) for x in u),
         "cost_usd": sum(r[1] or 0 for r in rows),
     }
-
-
-def cost_usd() -> float:
-    return usage()["cost_usd"]
 
 
 def _viewer(path: str, data: bytes | None = None) -> bytes:

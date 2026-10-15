@@ -8,6 +8,3 @@ agents:
     model_name: gpt-6-luna
     env:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
-verifier:
-  env:
-    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}  # only judge() needs it

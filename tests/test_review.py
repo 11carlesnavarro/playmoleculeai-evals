@@ -1,5 +1,6 @@
 """pmai_evals.review: a run for the review page, and the ratings back."""
 
+import getpass
 import json
 from datetime import UTC, datetime
 
@@ -29,7 +30,8 @@ def test_collect_and_export(tmp_path, monkeypatch):
     (trial / "agent/images/viewer-000.jpg").write_bytes(b"jpg")  # the sidecar's page shot
     (run / "config.json").write_text(json.dumps({"agents": [{"model_name": "m1"}]}))
     (trial / "config.json").write_text(json.dumps({"task": {"path": "evals/demo/cases/c1"}}))
-    for name in ("final-view.png", "final.png", "saved-fig.png"):
+    for name in ("final-view.png", "final.png", "saved-fig.png", "steps/000.jpg"):
+        (viewer / name).parent.mkdir(exist_ok=True)
         (viewer / name).write_bytes(b"png")
     (trial / "agent/events.jsonl").write_text("\n".join([
         call("run_bash", command="cat SKILL.md"),
@@ -47,7 +49,8 @@ def test_collect_and_export(tmp_path, monkeypatch):
     assert (c["tags"], c["holdout"], c["status"]) == (["pocket"], True, "running")
     assert c["rubric"] == [{"points": 7, "text": "The ligand is visible."},
                            {"points": 3, "text": "The pocket is labeled."}]
-    assert [i["file"] for i in c["images"]] == ["final-view.png", "saved-fig.png"]  # final.png: same view
+    # final.png: the same view; no steps
+    assert [i["file"] for i in c["images"]] == ["final-view.png", "saved-fig.png"]
     assert [x["name"] for x in c["calls"]] == ["run_bash", "pmview_python", "pmview_python"]
     assert (c["answer"], c["agent_screenshots"]) == ("Done.", 1)
     assert sorted(p.name for p in (tmp_path / "out/runs/demo-train-20261008-120000/c1").iterdir()) == [
@@ -58,9 +61,12 @@ def test_collect_and_export(tmp_path, monkeypatch):
     rating = {"run": meta["run"], "eval": "demo", "case": "c1", "rubric": c["rubric"],
               "checks": ["pass", "fail"], "note": "labels missing"}
     (docs / "r1.json").write_text(json.dumps({"id": "r1", "data": rating, "version": 1}))
-    review.export(docs)
     saved = tmp_path / "evals/demo/ratings/demo-train-20261008-120000.json"
-    assert json.loads(saved.read_text()) == [rating]
+    saved.parent.mkdir(parents=True)
+    local = rating | {"case": "c0", "reviewer": "me"}  # from make review: export keeps it
+    saved.write_text(json.dumps([local]))
+    review.export(docs)
+    assert json.loads(saved.read_text()) == [local, rating]
 
 
 def test_score():
@@ -144,5 +150,6 @@ def test_save_rating(tmp_path, monkeypatch):
     review._save_rating(doc | {"checks": ["fail"]})  # the same case again: replaced
     saved = json.loads((tmp_path / "evals/demo/ratings/demo-train-20261008-120000.json").read_text())
     assert [(d["case"], d["checks"]) for d in saved] == [("c1", ["pass"]), ("c2", ["fail"])]
+    assert saved[0]["reviewer"] == getpass.getuser()
     with pytest.raises(ValueError):
         review._save_rating(doc | {"run": "../../x"})

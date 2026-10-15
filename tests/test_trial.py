@@ -1,55 +1,33 @@
-import json
+import ast
 import shutil
 import sqlite3
-import threading
-from contextlib import contextmanager
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import sys
+from pathlib import Path
 
 import pytest
 
-from pmai_evals import trial
+from helpers import fake_viewer, make_db
+from pmai_evals import reward, trial
 from pmai_evals.reward import InfraError
 
 
-def make_db(path):
-    """A small agent.db with only the columns that trial.py reads."""
-    con = sqlite3.connect(path)
-    con.executescript("""
-        CREATE TABLE chats (id INTEGER PRIMARY KEY, is_subagent BOOLEAN);
-        CREATE TABLE messages (id INTEGER PRIMARY KEY, chat_id INTEGER, item_data TEXT, status TEXT);
-        CREATE TABLE usage_records (usage TEXT, cost_usd REAL);
-        INSERT INTO chats VALUES (1, 0), (2, 1);
-    """)
-    rows = [
-        (1, {"type": "function_call", "name": "run_bash", "call_id": "a", "arguments": "{}"}, None),
-        (1, {"type": "function_call_output", "call_id": "a", "output": []}, "error"),
-        (2, {"type": "message", "role": "assistant", "content": [{"text": "sub"}]}, None),
-        (1, {"type": "message", "role": "assistant", "content": [{"text": "x <answer>1.40</answer>"}]}, None),
-    ]
-    con.executemany(
-        "INSERT INTO messages (chat_id, item_data, status) VALUES (?, ?, ?)",
-        [(c, json.dumps(i), s) for c, i, s in rows],
-    )
-    con.execute(
-        "INSERT INTO usage_records VALUES (?, ?)",
-        (
-            json.dumps(
-                {"input_tokens": 10, "input_tokens_details": {"cached_tokens": 4}, "output_tokens": 3}
-            ),
-            0.25,
-        ),
-    )
-    con.commit()
-    con.close()
+def test_stdlib_only():
+    """trial.py and reward.py run in the grader venv and on the host: the stdlib only."""
+    for module in (trial, reward):
+        tree = ast.parse(Path(module.__file__).read_text())
+        names = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+        names |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
+        outside = {x.split(".")[0] for x in names} - sys.stdlib_module_names - {"pmai_evals"}
+        assert not outside, f"{module.__name__} imports {outside}"
 
 
 def test_trial(tmp_path, monkeypatch):
     make_db(tmp_path / "agent.db")
     monkeypatch.setattr(trial, "DB", tmp_path / "agent.db")
     assert trial.tag() == "1.40"  # main chat only, not the subagent
-    assert [c["name"] for c in trial.tool_calls()] == ["run_bash"]
+    assert [c["name"] for c in trial.tool_calls()] == ["pmview_python"]
     assert len(trial.tool_errors()) == 1
-    assert trial.usage() == {"input_tokens": 10, "cached_tokens": 4, "output_tokens": 3, "cost_usd": 0.25}
+    assert trial.usage() == {"input_tokens": 10, "cached_tokens": 4, "output_tokens": 2, "cost_usd": 0.03}
 
 
 def read_only(folder, *files):
@@ -70,42 +48,16 @@ def test_read_only_folder(tmp_path):
     keeper.execute("SELECT 1 FROM chats").fetchall()
     clean = read_only(tmp_path / "clean", db)  # pmai exited: no -wal, no -shm
     with sqlite3.connect(db) as w:
-        w.execute("INSERT INTO usage_records VALUES ('{}', 0.5)")
+        w.execute("INSERT INTO usage_records VALUES ('r3', '{}', 0.5)")
     killed = read_only(tmp_path / "killed", db, *tmp_path.glob("agent.db-*"))
     keeper.close()
     try:
-        assert trial.usage(clean)["cost_usd"] == 0.25
-        assert trial.usage(killed)["cost_usd"] == 0.75
+        assert trial._readable(clean) != clean  # a copy: the test user cannot write the folder
+        assert trial.usage(clean)["cost_usd"] == 0.03
+        assert trial.usage(killed)["cost_usd"] == 0.53
     finally:
         for d in (clean.parent, killed.parent):
             d.chmod(0o755)
-
-
-@contextmanager
-def fake_viewer(routes: dict):
-    """The sidecar's control API: path -> (status, body). The last POST body is routes["posted"]."""
-
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            status, body = routes[self.path]
-            self.send_response(status)
-            self.end_headers()
-            self.wfile.write(body)
-
-        def do_POST(self):
-            routes["posted"] = self.rfile.read(int(self.headers["Content-Length"])).decode()
-            self.do_GET()
-
-        def log_message(self, *args):
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=server.serve_forever, args=(0.01,), daemon=True).start()  # 0.01: fast shutdown
-    try:
-        yield f"http://127.0.0.1:{server.server_port}"
-    finally:
-        server.shutdown()
-        server.server_close()
 
 
 def test_viewer(tmp_path, monkeypatch):
@@ -128,5 +80,5 @@ def test_viewer(tmp_path, monkeypatch):
     with pytest.raises(InfraError, match="the task needs"):
         trial.viewer_screenshot()
     monkeypatch.setattr(trial, "VIEWER", url)  # the server is gone
-    with pytest.raises(InfraError, match="Connection refused"):
+    with pytest.raises(InfraError, match=r"viewer /screenshot: .*Connection refused"):
         trial.viewer_screenshot()

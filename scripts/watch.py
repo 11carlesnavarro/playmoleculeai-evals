@@ -10,6 +10,8 @@ import sys
 import time
 from pathlib import Path
 
+from pmai_evals.trial import HOST_ARTIFACTS, text
+
 
 def say(item: dict) -> str | None:
     """One line for a finished output item of pmai's stream (agent/events.jsonl)."""
@@ -17,16 +19,17 @@ def say(item: dict) -> str | None:
     if kind == "function_call":
         return f"CALL  {item['name']} {item.get('arguments', '')[:160]}"
     if kind == "message":
-        text = "".join(p.get("text", "") for p in item.get("content") or [])
-        return "SAY   " + text.replace("\n", " ")[:300]
+        return "SAY   " + text(item.get("content")).replace("\n", " ")[:300]
     if kind == "reasoning":
-        text = " ".join(p.get("text", "") for p in item.get("summary") or []).replace("\n", " ")
-        return f"THINK {text[:140]}" if text else None
+        summary = " ".join(p.get("text", "") for p in item.get("summary") or []).replace("\n", " ")
+        return f"THINK {summary[:140]}" if summary else None
     return None
 
 
 def new_lines(f: Path, offsets: dict) -> list[str]:
     """The complete lines added to f since the last call: a line still being written waits."""
+    if not f.exists():
+        return []
     with f.open("rb") as fh:
         fh.seek(offsets.get(f, 0))
         data = fh.read()
@@ -37,12 +40,12 @@ def new_lines(f: Path, offsets: dict) -> list[str]:
 
 def events(trial: Path, offsets: dict, images: set) -> list[str]:
     out, agent = [], trial / "agent/events.jsonl"
-    for raw in new_lines(agent, offsets) if agent.exists() else []:
+    for raw in new_lines(agent, offsets):
         event = json.loads(raw)
         if event.get("type") == "response.output_item.done" and (line := say(event["item"])):
             out.append(line)
-    viewer = trial / "artifacts/logs/artifacts/viewer"
-    for raw in new_lines(viewer / "events.jsonl", offsets) if (viewer / "events.jsonl").exists() else []:
+    viewer = trial / HOST_ARTIFACTS / "viewer"
+    for raw in new_lines(viewer / "events.jsonl", offsets):
         event = json.loads(raw)
         if event["event"] == "ready":
             out.append(f"VIEW  ready in {event['seconds']} s, images in {viewer}/steps")
@@ -76,8 +79,9 @@ def main(job: Path) -> None:
 
 
 if __name__ == "__main__":
-    newest = max((p for p in Path("results").iterdir() if not p.name.startswith(".")),
-                 key=lambda p: p.stat().st_mtime)
-    job = Path(sys.argv[1]) if len(sys.argv) > 1 else newest
+    runs = [p for p in Path("results").glob("*") if p.is_dir() and not p.name.startswith(".")]
+    if len(sys.argv) < 2 and not runs:
+        sys.exit("No run in results/ yet: make run first.")
+    job = Path(sys.argv[1]) if len(sys.argv) > 1 else max(runs, key=lambda p: p.stat().st_mtime)
     with contextlib.suppress(KeyboardInterrupt):
         main(job)

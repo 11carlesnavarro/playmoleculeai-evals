@@ -1,6 +1,6 @@
 """Viewer sidecar: the deployed PMView site in headless Chromium, for one trial.
 
-The browser opens the site (PMVIEW_URL) and logs in as the eval account. Playwright takes these
+The browser opens the site (PMVIEW_URL) and logs in as PM_EMAIL. Playwright takes these
 things away from the site:
 - PMView's agent socket (/v3/agent/ws/...): PMView talks to this sidecar, not to the site's agent.
 - the trial project's files (/v3/file/<project>/...): the shared project folder, not the site's bucket.
@@ -32,9 +32,9 @@ import aiohttp
 from aiohttp import web
 
 SITE = (os.environ.get("PMVIEW_URL") or "https://acellera.playmolecule.ai").rstrip("/")  # empty: default
-# pmai run --viewer-id eval. compose.yaml sets it for a trial; the default is for a hand run (plan 5.8)
+# pmai run --viewer-id eval. compose.yaml sets it for a trial; the default is for a hand run
 AGENT_WS = os.environ.get("AGENT_WS", "ws://localhost:8100/v1/ws/eval")
-PRELOAD = json.loads(os.environ.get("VIEWER_PRELOAD") or "{}")  # the task's start: {"pdb_ids", "files"}
+PRELOAD = json.loads(os.environ.get("VIEWER_PRELOAD") or "{}")  # the task's start: {"pdb_ids": [...]}
 FILES = Path(os.environ.get("FILES_ROOT", "/files"))  # <project>/<path>, as in a backend bucket
 EVIDENCE = Path(os.environ.get("EVIDENCE_DIR", "/logs/artifacts/viewer"))
 BUILD = Path(os.environ.get("PMVIEW_BUILD", "/srv/pmview"))  # no index.html: PMView from the site
@@ -54,7 +54,7 @@ LOGIN = """async ([username, password]) => {
   const body = new URLSearchParams({username, password});
   return (await fetch("/v3/auth/login", {method: "POST", headers: {"X-CSRF-Token": csrf}, body})).status;
 }"""
-SCRIPTS = "() => [...document.scripts].map(s => s.src).filter(Boolean)"  # the deployed PMView build
+SCRIPTS = "() => [...document.scripts].map(s => s.src).filter(Boolean)"  # PMView's, from the site or BUILD
 
 
 def log(event: str, **fields) -> None:
@@ -117,24 +117,29 @@ class Viewer:
         """A result goes to the call that sent the command, else to pmai. A result can come on a
         new socket: PMView answers on the socket it has when the tool ends."""
         while True:
-            message = json.loads(await self.inbox.get())
-            if message.get("type") != "pmview_result":
-                continue  # pong
-            answer = self.waiting.get(message.get("command_id"))
-            if answer is not None:
-                if not answer.done():
-                    answer.set_result(message)
-            elif self.agent is not None:
-                tool = self.tools.pop(message.get("command_id"), None)
-                # a read leaves the page as it was: only the first command of the trial shows the start
-                shoot = self.shoot and not (tool in READS and self.shots)
-                shot = f"steps/{len(self.shots):03}.jpg" if shoot else None
-                # logged before pmai gets it, so before agent.db has the step: trajectory.py needs the order
-                log("pmai_result", tool=tool, shot=shot)
-                with contextlib.suppress(ConnectionError):  # pmai exits: its command is gone with it
-                    await self.agent.send_json(message)
-                if shot:
-                    self.shots.append(asyncio.create_task(self.shoot(EVIDENCE / shot)))
+            try:
+                await self._from_pmview(json.loads(await self.inbox.get()))
+            except Exception as error:  # never stop the results: each command would wait COMMAND_TIMEOUT
+                log("pmview_error", error=repr(error))
+
+    async def _from_pmview(self, message: dict) -> None:
+        if message.get("type") != "pmview_result":
+            return  # pong
+        answer = self.waiting.get(message.get("command_id"))
+        if answer is not None:
+            if not answer.done():
+                answer.set_result(message)
+        elif self.agent is not None:
+            tool = self.tools.pop(message.get("command_id"), None)
+            # a read leaves the page as it was: only the first command of the trial shows the start
+            shoot = self.shoot and not (tool in READS and self.shots)
+            shot = f"steps/{len(self.shots):03}.jpg" if shoot else None
+            # logged before pmai gets it, so before agent.db has the step: trajectory.py needs the order
+            log("pmai_result", tool=tool, shot=shot)
+            with contextlib.suppress(ConnectionError):  # pmai exits: its command is gone with it
+                await self.agent.send_json(message)
+            if shot:
+                self.shots.append(asyncio.create_task(self.shoot(EVIDENCE / shot)))
 
 
 async def keepalive(viewer: Viewer) -> None:
@@ -142,7 +147,10 @@ async def keepalive(viewer: Viewer) -> None:
     while True:
         await asyncio.sleep(PING_EVERY)
         if viewer.ws is not None:
-            viewer.ws.send(json.dumps({"type": "ping"}))
+            try:
+                viewer.ws.send(json.dumps({"type": "ping"}))
+            except Exception as error:  # a closed socket: PMView opens a new one
+                log("ping_error", error=repr(error))
 
 
 async def bridge(viewer: Viewer, http: aiohttp.ClientSession, url: str) -> None:
@@ -337,8 +345,11 @@ async def until_ready(viewer: Viewer, browser: Browser, deadline: float) -> None
     while time.monotonic() < deadline:
         if browser.broken:
             raise Unavailable(browser.broken)
-        with contextlib.suppress(TimeoutError):
+        try:
             output = await viewer.call("pmview_run_python", timeout=30, code="print('ready')")
+        except (TimeoutError, ToolFailed) as error:  # a PMView that still boots can fail a tool
+            why = str(error) or why
+        else:
             if "ready" in (output.get("stdout") or ""):
                 return
             # "The Python engine is still starting (20%)..."
@@ -349,17 +360,12 @@ async def until_ready(viewer: Viewer, browser: Browser, deadline: float) -> None
 
 
 async def preload(viewer: Viewer) -> None:
-    """As the agent loads them: a PDB id with Molecule (the pmview skill's way), files with pmview_load."""
+    """As the agent loads them: a PDB id with Molecule (the pmview skill's way)."""
     for pdb in PRELOAD.get("pdb_ids", []):
         output = await viewer.call("pmview_run_python", code=f"Molecule({pdb!r}).view()\nprint('loaded')")
         if (output.get("stdout") or "").split()[-1:] != ["loaded"]:  # other output can come first
             raise Unavailable(f"preload {pdb}: {output}")
         log("preloaded", pdb=pdb)
-    if files := PRELOAD.get("files"):
-        output = await viewer.call("pmview_load", files=files, overwrite=True)
-        if not output.get("success"):
-            raise Unavailable(f"preload {files}: {output}")
-        log("preloaded", files=files)
 
 
 async def healthz(request: web.Request) -> web.Response:

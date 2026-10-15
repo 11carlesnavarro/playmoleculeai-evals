@@ -8,8 +8,10 @@ from types import SimpleNamespace
 
 import yaml
 
+from helpers import fake_viewer, make_db
 from pmai_evals.agent import KEEP_VIEW, PmaiAgent
-from test_trial import fake_viewer, make_db
+
+ROOT = Path(__file__).parent.parent
 
 
 def run_script(tmp_path, **kwargs) -> str:
@@ -28,54 +30,52 @@ def script_line(tmp_path, start: str, **kwargs) -> str:
     return next(x for x in run_script(tmp_path, **kwargs).splitlines() if x.startswith(start))
 
 
+def bash(block: str, cwd=None, **env) -> subprocess.CompletedProcess:
+    env = {"PATH": os.environ["PATH"], **env}
+    return subprocess.run(["bash", "-c", block], env=env, cwd=cwd, text=True, capture_output=True)
+
+
+def from_line(tmp_path, start: str) -> str:
+    """The script from its first line that starts with `start`, with a fake pmai that prints its arguments
+    and returns $RC."""
+    lines = run_script(tmp_path, model_name="openai/gpt-6-luna").splitlines()
+    first = next(i for i, x in enumerate(lines) if x.startswith(start))
+    block = "\n".join(["set -e", 'pmai() { echo "$@"; return ${RC:-0}; }', *lines[first:]])
+    return block.replace(KEEP_VIEW, "echo kept").replace(" > /logs/agent/events.jsonl", "")
+
+
 def test_script(tmp_path):
-    s = run_script(tmp_path, model_name="openai/gpt-6-luna", flags="--backend local")
-    assert "cp -r /opt/pmai-config/default/. /logs/agent/home/" in s
-    assert 'FLAGS="--backend local"' in s
+    s = run_script(tmp_path, model_name="openai/gpt-6-luna")
+    assert "cp -r /opt/pmai-config/. /logs/agent/home/" in s and "cd /app" in s
     assert "--config /logs/agent/home --model gpt-6-luna --output json" in s
     assert shlex.quote("it's a 'quoted' prompt") in s
     assert "> /logs/agent/events.jsonl || status=$?" in s
+    assert "--model" not in run_script(tmp_path)  # no model: the config's default
 
 
 def test_viewer(tmp_path):
     """VIEWER_URL (viewer tasks): /open, then --viewer-id. A 503 stops the script with the reason."""
-    lines = run_script(tmp_path, flags="--backend local").splitlines()
-    start = next(i for i, x in enumerate(lines) if x.startswith("FLAGS="))
-    block = "\n".join(["set -e", *lines[start : lines.index("fi", start) + 1], 'echo "$FLAGS"'])
-    project = tmp_path / "p1"
+    block, project = from_line(tmp_path, 'if [ -n "${VIEWER_URL'), tmp_path / "p1"
     project.mkdir()
-
-    def run(**env):
-        env = {"PATH": os.environ["PATH"], **env}
-        return subprocess.run(["bash", "-c", block], env=env, cwd=project, text=True, capture_output=True)
-
-    assert run().stdout == "--backend local\n"  # not a viewer task
+    assert bash(block, project).stdout.startswith("run --config ")  # not a viewer task
     routes = {"/open?project=p1": (200, b"ready")}
     with fake_viewer(routes) as url:
-        assert run(VIEWER_URL=url).stdout == "--backend local --viewer-id eval\n"
+        assert bash(block, project, VIEWER_URL=url).stdout.startswith("run --viewer-id eval --config ")
         routes["/open?project=p1"] = (503, b"no WebGL2: Mol* cannot draw")
-        r = run(VIEWER_URL=url)
+        r = bash(block, project, VIEWER_URL=url)
     assert (r.returncode, r.stdout, r.stderr) == (1, "", "viewer /open: 503 no WebGL2: Mol* cannot draw\n")
 
 
 def test_keeps_the_view(tmp_path):
     """After the turn, also a failed one, a viewer task keeps the final view. The exit code stays pmai's."""
-    lines = run_script(tmp_path).splitlines()
-    start = next(i for i, x in enumerate(lines) if x.startswith("pmai run"))
-    block = "\n".join(["set -e", "pmai() { return 3; }", *lines[start:]])
-    block = block.replace(KEEP_VIEW, "echo kept").replace("/logs/agent/events.jsonl", str(tmp_path / "e"))
-
-    def run(**env):
-        env = {"PATH": os.environ["PATH"], **env}
-        return subprocess.run(["bash", "-c", block], env=env, text=True, capture_output=True)
-
-    for env, out in [({}, ""), ({"VIEWER_URL": "http://viewer"}, "kept\n")]:  # not a viewer task, then one
-        r = run(**env)
-        assert (r.returncode, r.stdout) == (3, out)
+    block = from_line(tmp_path, "pmai run")
+    for env, kept in [({}, False), ({"VIEWER_URL": "http://viewer"}, True)]:  # not a viewer task, then one
+        r = bash(block, RC="3", **env)
+        assert (r.returncode, r.stdout.endswith("kept\n")) == (3, kept)
 
 
 def test_provider_stop_is_an_api_error(tmp_path):
-    """The glycans trial of round 6: OpenAI stopped the turn. An UnknownApiError: the job runs it again."""
+    """A provider stop ([LLM_FAILED]) is an UnknownApiError: the job runs the trial again."""
     out = ("Upgraded the config\n[LLM_FAILED] model=gpt-6-luna code=bio_policy message=This content was "
            "flagged for possible biological risk.\n")
     error = PmaiAgent(logs_dir=tmp_path)._classify_exec_error("pmai run", SimpleNamespace(
@@ -85,23 +85,14 @@ def test_provider_stop_is_an_api_error(tmp_path):
         return_code=1, stdout="Traceback: KeyError", stderr=None))).__name__ == "NonZeroAgentExitCodeError"
 
 
-def test_no_model(tmp_path):
-    s = run_script(tmp_path, pmai_config="/opt/pmai-config/pm", work="/data/p1")
-    assert "--model" not in s
-    assert "cd /data/p1" in s and "/opt/pmai-config/pm/." in s
-
-
 def test_context(tmp_path):
     (tmp_path / "home").mkdir()
     make_db(tmp_path / "home" / "agent.db")
 
-    class Ctx:
-        pass
-
-    ctx = Ctx()
+    ctx = SimpleNamespace()
     PmaiAgent(logs_dir=tmp_path).populate_context_post_run(ctx)
-    assert (ctx.n_input_tokens, ctx.n_cache_tokens, ctx.n_output_tokens, ctx.cost_usd) == (10, 4, 3, 0.25)
-    assert json.loads(json.dumps(vars(ctx)))  # plain numbers, as Harbor stores them
+    assert (ctx.n_input_tokens, ctx.n_cache_tokens, ctx.n_output_tokens, ctx.cost_usd) == (10, 4, 2, 0.03)
+    assert json.loads((tmp_path / "trajectory.json").read_text())["steps"]
 
 
 def test_context_never_raises(tmp_path):
@@ -109,10 +100,7 @@ def test_context_never_raises(tmp_path):
     (tmp_path / "home").mkdir()
     (tmp_path / "home" / "agent.db").write_text("not a database")
 
-    class Ctx:
-        pass
-
-    ctx = Ctx()
+    ctx = SimpleNamespace()
     PmaiAgent(logs_dir=tmp_path).populate_context_post_run(ctx)
     assert not vars(ctx)
 
@@ -132,7 +120,6 @@ def label(tmp_path, **kwargs) -> str:
 
 def test_label(tmp_path):
     assert label(tmp_path) == "pmai"
-    assert label(tmp_path, pmai_config="/opt/pmai-config/no-skills") == "pmai-no-skills"
     assert label(tmp_path, reasoning_effort="low") == "pmai-effort-low"
 
 
@@ -140,27 +127,12 @@ def test_reasoning_effort(tmp_path):
     """The script line sets the top level effort of the real config, not the effort of a model entry."""
     home = tmp_path / "logs/agent/home"
     home.mkdir(parents=True)
-    default = Path("docker/configs/default/agent_config.yaml").read_text()
+    default = (ROOT / "docker/agent_config.yaml").read_text()
     (home / "agent_config.yaml").write_text(default)
     line = script_line(tmp_path, "sed ", reasoning_effort="low")
     subprocess.run(["bash", "-c", line.replace("/logs/", f"{tmp_path}/logs/")], check=True)
     cfg = yaml.safe_load((home / "agent_config.yaml").read_text())
-    assert cfg["reasoning"]["effort"] == "low" and yaml.safe_load(default)["reasoning"]["effort"] == "xhigh"
+    assert cfg["reasoning"]["effort"] == "low" != yaml.safe_load(default)["reasoning"]["effort"]
     assert cfg["available_models"] == yaml.safe_load(default)["available_models"]
     assert "sed " not in run_script(tmp_path)  # no option: the config's effort
 
-
-def test_arm_names_are_the_labels(tmp_path):
-    """The viewer shows the job file name, the job summary the label: they must be the same."""
-    for job in Path("experiments").glob("*.yaml"):
-        for arm in yaml.safe_load(job.read_text())["agents"]:
-            assert arm["name"] == label(tmp_path, **arm.get("kwargs", {})), job
-
-
-def test_no_skills_is_default_without_skills():
-    def load(name):
-        return yaml.safe_load(Path(f"docker/configs/{name}/agent_config.yaml").read_text())
-
-    default = load("default")
-    del default["plugins"]["skills"]
-    assert load("no-skills") == default

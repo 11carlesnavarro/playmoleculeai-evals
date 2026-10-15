@@ -1,4 +1,5 @@
-"""pytest plugin: one score per test, reward = mean. Use: pytest -p pmai_evals.reward"""
+"""pytest plugin: one score per test, reward = mean. A skipped test does not count.
+Use: pytest -p pmai_evals.reward"""
 
 import json
 import os
@@ -17,13 +18,15 @@ class InfraError(Exception):
 
 def partial(value: float) -> float:
     """Give the running test a score from 0 to 1 instead of pass or fail."""
-    name = os.environ["PYTEST_CURRENT_TEST"].split("::")[-1].split(" ")[0]
+    name = os.environ["PYTEST_CURRENT_TEST"].split("::")[-1].rsplit(" ", 1)[0]  # "<name> (call)"
     _partial[name] = float(value)
     return float(value)
 
 
 def pytest_runtest_logreport(report):
     name = report.nodeid.split("::")[-1]
+    if report.skipped:
+        return
     if report.when == "call" or report.failed:  # a setup error counts as 0
         _scores[name] = _partial.get(name, 1.0) if report.passed else 0.0
 
@@ -31,6 +34,11 @@ def pytest_runtest_logreport(report):
 def pytest_runtest_makereport(item, call):  # returns None: pytest still makes the report
     if call.excinfo and call.excinfo.errisinstance(InfraError):
         _infra.append(f"{item.name}: {call.excinfo.value}")
+
+
+def pytest_collectreport(report):  # a test file that does not import: the eval is broken, not the agent
+    if report.failed:
+        _infra.append(f"{report.nodeid}: cannot collect, see the error above")
 
 
 def pytest_sessionfinish(session):

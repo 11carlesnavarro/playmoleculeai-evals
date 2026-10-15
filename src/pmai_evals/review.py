@@ -14,18 +14,20 @@ the points add up to 10, and the score is the points of the yes lines (0 to 10).
 one line worth 10 points.
 
 serve is the same page on this machine: each click is saved in evals/<eval>/ratings/<run>.json.
-On claude.ai, export reads the page's `ratings` docs (ArtifactData list with out_dir) into that file.
+On claude.ai, export reads the page's `ratings` docs (ArtifactData list with out_dir) into that file: for
+a case that has a review in both, the one from claude.ai stays.
 
 combine builds the jobs that make view shows: one Harbor job for each job file, <view>/<eval>-<job file>/,
 with all its runs (results/<eval>-<job file>-<date>/) and the run's date in the agent name, so each run is
 one row and one Pareto point. The reviews in evals/<eval>/ratings/<run>.json are the reward human_reward
 (score / 10) of each reviewed trial, and their mean is a metric of the run, with its cost_usd and minutes.
 When the job file turns the verifier off (the eval has no score yet), the view shows no verifier rewards
-for any of its runs: the old ones came from tests that the eval no longer has.
+for any of its runs.
 Its files are hard links to the runs' files (no space) except result.json and config.json; make view
 builds it again each time.
 """
 
+import getpass
 import http.server
 import json
 import os
@@ -40,6 +42,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import yaml
+
+from pmai_evals.trial import text
 
 IMAGES = {".png", ".jpg", ".jpeg", ".webp"}
 NO_RUBRIC = [{"points": 10, "text": "The result does what the prompt asks."}]
@@ -82,7 +86,7 @@ def _trace(events: Path) -> tuple[list[dict], str]:
         if item["type"] == "function_call":
             calls.append({"name": item["name"], "args": _short(item.get("arguments"))})
         elif item["type"] == "message":
-            answer = "".join(p.get("text", "") for p in item.get("content") or [])
+            answer = text(item.get("content"))
     return calls, answer
 
 
@@ -91,7 +95,10 @@ def _rubric(path: Path) -> list[dict]:
     if not path.exists():
         return NO_RUBRIC
     lines = (line.split(None, 1) for line in path.read_text().splitlines() if line.strip())
-    return [{"points": int(points), "text": text.strip()} for points, text in lines]
+    try:
+        return [{"points": int(points), "text": text.strip()} for points, text in lines]
+    except ValueError:
+        raise ValueError(f'{path}: each line must be "<points> <criterion>", in whole points') from None
 
 
 def score(rubric: list[dict], checks: list) -> float | None:
@@ -126,10 +133,10 @@ def case(trial: Path, out: Path, eval_name: str, scored: bool) -> dict | None:
     if not task_dir.is_dir():
         return None
     keywords = tomllib.loads((task_dir / "task.toml").read_text())["task"].get("keywords", [])
-    result = json.loads((trial / "result.json").read_text()) if (trial / "result.json").exists() else None
+    result = json.loads((trial / "result.json").read_text()) if (trial / "result.json").exists() else {}
     calls, answer = _trace(trial / "agent/events.jsonl")
-    rewards = ((result or {}).get("verifier_result") or {}).get("rewards") or {} if scored else {}
-    error = (result or {}).get("exception_info")
+    rewards = (result.get("verifier_result") or {}).get("rewards") or {} if scored else {}
+    error = result.get("exception_info")
     return {
         "case": task_dir.name,
         "trial": trial.name,
@@ -137,14 +144,15 @@ def case(trial: Path, out: Path, eval_name: str, scored: bool) -> dict | None:
         "holdout": "holdout" in keywords,
         "prompt": (task_dir / "instruction.md").read_text().strip(),
         "rubric": _rubric(task_dir / "tests/rubric.txt"),
-        "status": "running" if result is None else "error" if error else "done",
+        "status": "running" if not result else "error" if error else "done",
         "error": error and error.get("exception_type"),
         "images": _images(trial, out / task_dir.name),
         "calls": calls,
         "answer": answer,
-        "cost_usd": ((result or {}).get("agent_result") or {}).get("cost_usd"),
-        "agent_seconds": _seconds((result or {}).get("agent_execution")),
-        "agent_screenshots": len(list((trial / "agent/images").glob("call_*"))),  # the images tools returned
+        "cost_usd": (result.get("agent_result") or {}).get("cost_usd"),
+        "agent_seconds": _seconds(result.get("agent_execution")),
+        # the images that tools returned; trajectory.py adds the sidecar's steps as viewer-*
+        "agent_screenshots": sum(not p.name.startswith("viewer-") for p in trial.glob("agent/images/*")),
         "reward": rewards.get("reward"),
         "tests": {k: v for k, v in rewards.items() if k != "reward"},
     }
@@ -178,7 +186,6 @@ def collect(run_dir: Path, out: Path) -> None:
     (out / "runs" / f"{run}.json").write_text(json.dumps({**meta, "cases": cases}))
     (out / f"{run}.db.json").write_text(json.dumps(meta))
     print(f"{run}: {meta['finished']}/{meta['cases']} finished, {len(cases)} on the page -> {out}")
-    # ponytail: an artifact version holds at most 511 files (about 16 a run); remove old runs (ratings stay)
 
 
 def export(docs_dir: Path) -> None:
@@ -187,13 +194,12 @@ def export(docs_dir: Path) -> None:
     for (eval_name, run) in sorted({(d["eval"], d["run"]) for d in docs}):
         mine = sorted((d for d in docs if d["run"] == run), key=lambda d: d["case"])
         path = _ratings(eval_name, run)
-        _write(path, mine)
-        scores = [s for d in mine if (s := score(d["rubric"], d["checks"])) is not None]
-        mean = sum(scores) / max(len(scores), 1)
-        print(f"\n{path}: {len(scores)} reviewed, mean score {mean:.1f} / 10")
-        for d in mine:
+        _merge(path, mine)
+        scores = [score(d["rubric"], d["checks"]) for d in mine]
+        done = [s for s in scores if s is not None]
+        print(f"\n{path}: {len(done)} reviewed, mean score {sum(done) / max(len(done), 1):.1f} / 10")
+        for d, s in zip(mine, scores, strict=True):
             failed = [r["text"] for r, c in zip(d["rubric"], d["checks"], strict=False) if c == "fail"]
-            s = score(d["rubric"], d["checks"])
             print(f"  {d['case']:28} {'-' if s is None else s:>4}  {'; '.join(failed)[:90]}")
 
 
@@ -201,8 +207,13 @@ def _ratings(eval_name: str, run: str) -> Path:
     return Path("evals") / eval_name / "ratings" / f"{run}.json"
 
 
-def _write(path: Path, docs: list[dict]) -> None:
+def _merge(path: Path, docs: list[dict]) -> None:
+    """Reviews into evals/<eval>/ratings/<run>.json. One review a case: a new one replaces the old one,
+    also from another reviewer."""
+    new = {d["case"] for d in docs}
+    old = [d for d in json.loads(path.read_text()) if d["case"] not in new] if path.exists() else []
     path.parent.mkdir(parents=True, exist_ok=True)
+    docs = sorted(old + docs, key=lambda d: d["case"])
     path.write_text(json.dumps(docs, indent=1, ensure_ascii=False) + "\n")
 
 
@@ -251,9 +262,11 @@ def _view_trial(trial: Path, out: Path, date: str, eval_name: str, scored: bool,
 
 def combine(results: Path, view: Path) -> None:
     groups = defaultdict(list)
-    for run in sorted(results.iterdir()):
+    for run in sorted(results.glob("*")):
         if (m := RUN.fullmatch(run.name)) and (run / "result.json").exists():
             groups[m.group(1)].append(run)
+    if not groups:
+        sys.exit(f"No finished run in {results}/ yet: make run first.")
     shutil.rmtree(view, ignore_errors=True)
     for group, runs in groups.items():
         out = view / group
@@ -310,12 +323,10 @@ def combine(results: Path, view: Path) -> None:
 
 
 def _save_rating(doc: dict) -> None:
-    """One review from the page into evals/<eval>/ratings/<run>.json, the file export writes."""
+    """One review from the page, by the user who runs make review."""
     if not (RUN.fullmatch(doc["run"]) and re.fullmatch(r"[\w-]+", doc["eval"])):
         raise ValueError(f"not a run: {doc['eval']}/{doc['run']}")
-    path = _ratings(doc["eval"], doc["run"])
-    docs = json.loads(path.read_text()) if path.exists() else []
-    _write(path, sorted([d for d in docs if d["case"] != doc["case"]] + [doc], key=lambda d: d["case"]))
+    _merge(_ratings(doc["eval"], doc["run"]), [doc | {"reviewer": getpass.getuser()}])
 
 
 def serve(results: Path, port: int) -> None:
@@ -326,7 +337,7 @@ def serve(results: Path, port: int) -> None:
     lock = threading.Lock()
 
     def runs() -> dict[str, Path]:
-        return {r.name: r for r in sorted(results.iterdir())
+        return {r.name: r for r in sorted(results.glob("*"))
                 if RUN.fullmatch(r.name) and any((t / "config.json").exists() for t in r.iterdir())}
 
     class Handler(http.server.SimpleHTTPRequestHandler):
@@ -369,7 +380,7 @@ def serve(results: Path, port: int) -> None:
         def log_message(self, *args) -> None:
             pass
 
-    cache.mkdir(exist_ok=True)
+    cache.mkdir(parents=True, exist_ok=True)
     try:
         server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
     except OSError:
@@ -380,14 +391,14 @@ def serve(results: Path, port: int) -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        sys.exit(__doc__)
-    command, path = sys.argv[1], Path(sys.argv[2])
-    if command == "collect":
-        collect(path, Path(sys.argv[3]))
-    elif command == "export":
-        export(path)
-    elif command == "combine":
-        combine(path, Path(sys.argv[3]))
-    else:
-        serve(path, int(sys.argv[3]))
+    match sys.argv[1:]:
+        case ["collect", run, out]:
+            collect(Path(run), Path(out))
+        case ["export", docs]:
+            export(Path(docs))
+        case ["combine", results, view]:
+            combine(Path(results), Path(view))
+        case ["serve", results, port]:
+            serve(Path(results), int(port))
+        case _:
+            sys.exit(__doc__)

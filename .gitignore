@@ -1,10 +1,13 @@
-# secrets
+# secrets and personal settings
 .env
+local.mk
+CLAUDE.local.md
 
-# personal tooling (tracked skills stay tracked)
+# personal tooling
 .claude
 .codex
 .playwright-mcp/
+.orca/
 development/
 
 # python
@@ -20,4 +23,8 @@ dist/
 # harbor results (make run)
 results/
 
+# working notes and local tools: hill climb proposals, judge calibration, the dev backend account script
+evals/*/proposals/
+evals/*/judge/
+scripts/eval_account.py
 docs/pep-talk/

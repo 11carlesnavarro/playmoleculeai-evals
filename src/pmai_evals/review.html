@@ -252,7 +252,7 @@ async function openRun(run) {
     if (!res.ok) throw new Error(res.status);
     data = await res.json();
   } catch {
-    say(`The files of run ${run} are not on this page. Ask Claude to publish the run again.`);
+    say(S.db === localDb ? `The files of run ${run} are not in results/.` : `The files of run ${run} are not on this page. Ask Claude to publish the run again.`);
     return;
   }
   say("");
@@ -447,7 +447,10 @@ const localDb = {
   S.db = db;
   db.collection("runs").onSnapshot((snap) => {
     S.runs = snap.docs.map((d) => d.data()).sort((a, b) => (b.started || "").localeCompare(a.started || ""));
-    if (!S.runs.length) { say("No run to review yet. Ask Claude to add a run: it collects results/<run> and publishes it here."); return; }
+    if (!S.runs.length) {
+      say(db === localDb ? "No run in results/ yet: make run first." : "No run to review yet. Ask Claude to publish a run here.");
+      return;
+    }
     renderPicker();
     if (!S.meta) openRun(S.runs.some((r) => r.run === remember.get("run")) ? remember.get("run") : S.runs[0].run);
   }, (e) => say(`The run list stopped updating (${e.code}). Reload the page.`));

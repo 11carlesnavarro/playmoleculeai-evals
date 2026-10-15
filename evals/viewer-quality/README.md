@@ -2,8 +2,6 @@
 
 Does PlayMoleculeAI make a good PMView view? Each case is a viewer request from a real chat (dev, prod and open trace DBs). The score is the final view, as the user sees it. Cost, time and tool calls come from the trace. The goal is to hill climb: find what makes the views bad (the skill, the tools, PMView or the model) and fix it.
 
-Plan page: https://claude.ai/artifact/Jy2kpxN4vz6aAkGjhQZZYH
-
 ## Files
 
 ```text
@@ -13,13 +11,12 @@ cases/<case>/task.toml            keywords (category, "holdout"), source chats, 
 train.yaml                        job: the 15 hill climbing cases
 holdout.yaml                      job: the 5 held-out cases, only to check that a gain is real
 ratings/<run>.json                your reviews of a run (from the review page)
-proposals/round-<n>.md            one hill climb round: status, evidence, the changes as diffs, result
 ```
 
 ## Run
 
 ```bash
-make image && make viewer          # after a change to src/ or docker/; both build from the hill climb worktrees
+make image && make viewer          # after a change to src/, docker/ or the checkouts (README, Setup)
 make run JOB=evals/viewer-quality/train.yaml                       # 15 cases, gpt-6-luna: less than $1
 make run JOB=evals/viewer-quality/train.yaml CASE=vq-pocket-1hsg   # one case
 ```
@@ -62,104 +59,29 @@ your score is `human_reward` in `make view`.
 
 ## Status
 
-- 2026-10-08: the 20 cases are done. One test run of vq-pocket-1hsg worked (reward 1.0: the view was saved).
-- 2026-10-08: the baseline run `viewer-quality-train-20261008-145621` (gpt-6-luna, 15/15 finished, $0.41) is on the review page.
-- 2026-10-09: the 15 baseline views are reviewed (`ratings/viewer-quality-train-20261008-145621.json`): mean 5.9 / 10.
-  Most points are lost on the camera (the ligand or the key residues hidden or not in the center), on the key residues
-  not drawn as sticks, on sticks and spheres too thick, and on labels that overlap. vq-covalent-6oim no longer asks
-  for a dark background (the viewer background is always black).
-- 2026-10-09: hill climb round 1, in the `viewer-quality` worktrees (uncommitted). Run `viewer-quality-train-20261009-122438`
-  ($0.38, 15 trials) is on the review page. vq-labels-6lu7 failed: OpenAI flagged the prompt (SARS-CoV-2 Mpro) as biological risk.
-  PMAI: `include_screenshot` returns the viewer state and the screenshot after a 1 s wait; `pmview_screenshot`
-  returns the image; `pmai run --viewer-id` sends the viewer state and a screenshot with the prompt, as the app does;
-  correct tool descriptions; `viewer.md`: the result is the view, look at it and correct it before the answer.
-  Skills (pmview only): the camera, composing a view, the isovalue, the stick size.
-- 2026-10-09: round 1 reviewed (`ratings/viewer-quality-train-20261009-122438.json`): mean 5.9 / 10, the same as the
-  baseline. Better: pocket-1hsg, pocket-1m17, slide, labels. Worse: compare-vrk, covalent, interface, cleanup.
-  Causes: the agent sets stick `size` 0.8 to 1.45 (normal 0.15; the scale is only in references/styles.md, which
-  3 of these 4 cases did not read); labels you did not want; palette colours dark on the dark background and the
-  same for a residue and its protein; subjects still hidden (the agent looks 2 to 14 times, but PMView gives no
-  way to read or set the camera direction). vq-covalent-6oim asks for "a figure for a paper": the agent made a
-  file with molecule-render and gave the viewer little care.
-- 2026-10-09: round 2, run `viewer-quality-train-20261009-143543` ($0.37, 28 min, 14/15: OpenAI flagged
-  vq-deepsite-7y5k as biological risk). Not reviewed yet. The pmview skill is rewritten from the round 1 evidence (SKILL.md 139 → 72
-  lines; references `representations.md`, `selection.md`, `volumes.md`; `styles.md`, the coding guidelines, the
-  "do not set unless asked" rules and the palette link are removed). Facts it adds: the viewer docstring is wrong on
-  `size` (it says 1 is normal; sticks draw at 0.15, cartoon at 0.2); selections must be strings (7 errors);
-  `label_fields` is a list (5 errors); the background is black; labels cover what is behind them.
-- 2026-10-09: round 2 reviewed (`ratings/viewer-quality-train-20261009-143543.json`): mean 7.0 / 10 (7.5 without
-  vq-deepsite-7y5k, which OpenAI stopped), from 5.9. Better: pocket-1hsg 6 → 10, pocket-1m17 6 → 10, compare-vrk
-  1 → 6, covalent 3 → 6, poses 5 → 7, cleanup 7 → 10. Worse: hbonds 8 → 6. Still wrong: sticks and spheres too big
-  in 6 cases (agents that did not open representations.md, or that make the subject bigger to make it stand out),
-  labels nobody asked for, the camera (surface from the side).
-- 2026-10-09: round 3 applied and tested on this host, not run (`proposals/round-3.md`). The sidecar serves the
-  PMView build of the worktree `pmview-viewer-quality` (`make viewer`); the backend is still the site's. PMView:
-  `size=1` is the normal size of each style (before, sticks drew 6.7 times too thick); `mol.focus(sel, direction=...)`
-  and `pmv.camera_turn(right=, up=)`; a camera call after `mol.focus` in the same run is no longer lost. Skill: plain
-  "A good view" text (colour, not size, for the subject; residue names in the answer, not as labels); the new camera
-  calls. vq-covalent-6oim asks for the view, not "a high-quality figure".
-- 2026-10-09: round 3 run `viewer-quality-train-20261009-165017` ($0.40, 27 min, 14/15: OpenAI flagged
-  vq-labels-6lu7 again) and reviewed (`ratings/viewer-quality-train-20261009-165017.json`): mean 7.1 / 10 (7.6
-  without labels-6lu7), from 7.0. No thick sticks; covalent 6 → 9, compare-vrk 6 → 9, hbonds 6 → 8; interface 8 → 5
-  (the camera direction put the Fab in front of the interface). Eval fault: our PMView build switched to the
-  account's default project (`app` is not in its project list), so `pmview_load` failed in the 3 cases with files
-  (deepsite, poses, compare-vrk). Details in `proposals/round-3.md`.
-- 2026-10-09: round 4 applied and tested on this host, not run (`proposals/round-4.md`). The sidecar adds the trial
-  project to the account's project list, so `pmview_load` works with our PMView build. Skill: no `lig - pocket`
-  camera example; a pocket surface drawn only behind the ligand; label contrast; labels in the user's numbering
-  (change `mol.resid`). PMView: `mol.focus` keeps 2 Å around the selection (was 4 Å); `pmv.camera_zoom(distance)`.
-  vq-labels-6lu7 is now vq-labels-3hs4 (carbonic anhydrase II, acetazolamide), not comparable with the old case.
-- 2026-10-09: round 4 run `viewer-quality-train-20261009-181219` ($0.33, 30 min, 15/15; no OpenAI stop) is on the review
-  page. `pmview_load` worked in all 4 cases with files. The baseline images are off the page (511 file limit; its
-  reviews are in `ratings/`).
-- 2026-10-09: round 4 reviewed (`ratings/viewer-quality-train-20261009-181219.json`): mean 8.3 / 10 (8.2 on the 14
-  cases of round 3, from 7.6). Better: surface 6 → 10 (the surface behind the ligand), poses 7 → 10, resistance 7 → 10
-  (Thr790 in your numbering). Worse: pocket-1hsg 10 → 5 (residues in front of the ligand, camera far). Still wrong:
-  `VDW` balls on metals, labels nobody asked for, the palette colours. The screenshot that the agent and the review see
-  is not the canvas on the screen: PMView renders a small canvas at 1280 × 720 and crops it.
-- 2026-10-13: round 5 applied and tested on this host, not run (`proposals/round-5.md`). PMView: the screenshot is
-  the whole canvas, with no crop, and the named sizes keep its shape; a selection can be a mask or an index array; a
-  failed `mol.view` keeps nothing that it held. PMAI: no 1 s wait before the look; `pmview_screenshot` saves the view
-  when the user wants a file; the palette colours are for charts on light pages. Skill: colour the carbons of the
-  subject and keep the schemes for the rest; `Licorice`, not `VDW`, for an ion; no labels the user did not ask for.
-- 2026-10-13: round 5 run `viewer-quality-train-20261013-160804` ($0.37, 28 min, 15/15). All 15 final views are the
-  whole canvas (639 × 797). The review page now shows only the final view of each case, so all runs fit on it.
-- 2026-10-13: round 5 reviewed (`ratings/viewer-quality-train-20261013-160804.json`): mean 6.7 / 10. Part of the drop
-  is the image: round 4 rated a render 2.1 times wider than the canvas. Still wrong: labels nobody asked for (7 cases),
-  `VDW` iron, surfaces nobody asked for. Round 6 proposed (`proposals/round-6.md`): the screenshot size patch leaves PMView
-  (relative `size` stays: it ended the notes on thick sticks), a 2560 × 1440 browser window, and only what the user asks.
-- 2026-10-13: round 6 applied and tested on this host, not run (`proposals/round-6.md`). PMView: the screenshot code
-  is main's again, `pmv.camera_zoom(factor)` keeps main's name, `mol.focus` keeps Mol*'s 4 Å. The sidecar window is
-  2560 × 1440, so the canvas (1279 × 1437) is large enough for PMView to capture it as it is. PMAI prompt: show only
-  what the user asks. Skill: sticks, `VDW` only when asked, a surface only when asked, no colour-scheme advice.
-- 2026-10-13: round 6 run `viewer-quality-train-20261013-184940` ($0.41, 47 min, 15/15 final views; OpenAI stopped
-  vq-glycans-6vxx as biological risk). The trials take longer (median 4.6 min, round 5: 3.1): the model was slower.
-- 2026-10-14: round 6 reviewed (`ratings/viewer-quality-train-20261013-184940.json`): mean 7.4 / 10 (7.9 without
-  glycans). Better: pocket-1hsg, resistance, poses, labels, deepsite. Worse: chains (hemes behind the cartoon),
-  compare-vrk (labels). covalent still 0 (camera along the ligand). Details in `proposals/round-6.md`, Result.
-- 2026-10-14: round 7 proposed (`proposals/round-7.md`), from agent reviews of the round 6 traces and the chats: the
-  round 6 causes (a lost camera call, focus clipping, the hidden Tables tab, labels, the palette skill); `pmview_python`
-  returns the new view, `pmview_look`; `Interactions`, `pmv.visible`, `pmv.settings`.
-- 2026-10-14: round 7 applied and tested on this host, not run (`proposals/round-7.md`, Applied). PMAI comes from the
-  worktree `playmoleculeAI-2-viewer-quality`. A provider stop runs the trial once more.
-- 2026-10-14: round 7 run `viewer-quality-train-20261014-115559` ($0.32, 15/15) and reviewed
-  (`ratings/viewer-quality-train-20261014-115559.json`): mean 9.07 / 10. Worse: labels-3hs4, resistance (labels), poses
-  (colours). deepsite still 6. Details in `proposals/round-7.md`, Result. Round 8 proposed (`proposals/round-8.md`).
-- 2026-10-14: round 8 applied and tested on this host, not run (`proposals/round-8.md`, Applied): the state gives the
-  representations and the camera, `pmv.camera`, `camera_turn(azimuth, elevation, roll)`, Mol* settings by name
-  (`params=`, `pmv.params`), less steering in the skills. The round 7 state is committed in the four repos.
-- 2026-10-14: round 8 run `viewer-quality-train-20261014-150617` ($0.36, 15/15) and reviewed
-  (`ratings/viewer-quality-train-20261014-150617.json`): mean 8.07 on 14 cases (round 7: 9.0 on the same 14; p = 0.29,
-  can be noise). Details in `proposals/round-8.md`, Result. Round 9 proposed (`proposals/round-9.md`).
-- 2026-10-14: round 9 applied and tested on this host, not run (`proposals/round-9.md`, Applied): code keeps the
-  camera, focus frames and `clip` cuts, the camera in `get_viewer_state()`, index ranges, transparent images on white.
-  The final view is now the whole viewport (rounds 6 to 8 rated cropped images). The round 8 state is committed in the
-  four repos.
-- 2026-10-15: round 9 run `viewer-quality-train-20261014-192525` ($0.22, 17 min, 15/15, all final views the whole canvas
-  1279 × 1437) and reviewed (`ratings/viewer-quality-train-20261014-192525.json`): mean 9.2, the best round (round 8 on
-  the same 14 cases: 8.07; p = 0.34). Worse: compare, pocket-1m17, covalent. Details in `proposals/round-9.md`, Result.
-  Round 10 proposed (`proposals/round-10.md`).
-- 2026-10-13: no Harbor reward until the judge. The reward was 1.0 when the view was saved, so it said nothing. The
-  job files turn the verifier off, the agent wrapper keeps the final view after the turn, vq-slide-3ptb lists its
-  file as a Harbor artifact, and `make view` shows no verifier rewards for the runs of this eval (also the old ones).
-- Later: the judge (gpt-6.1-sol), checked against the reviews.
+The hill climb (rounds 1 to 10) changed PMAI, the skills and PMView on a branch `viewer-quality` of each (PMAI
+from main e7db8d07, acellera-skills from main 3100e83, PMView from main 2d6c8c4). The branches are not pushed yet:
+a build from main gives round 0. All runs: gpt-6-luna, one attempt, the 15 train cases; the score is the mean of
+the reviews (0 to 10).
+
+| Round | Run (`viewer-quality-train-`) | Score | Cost | Main change |
+|---|---|---|---|---|
+| 0 | 20261008-145621 | 5.93 | $0.41 | baseline: production PMAI, skills and PMView |
+| 1 | 20261009-122438 | 5.87 | $0.38 | the agent looks at the view (screenshot) and corrects it |
+| 2 | 20261009-143543 | 7.00 | $0.37 | pmview skill rewritten from the round 1 traces |
+| 3 | 20261009-165017 | 7.07 | $0.40 | PMView build in the sidecar: `size=1` is normal, camera calls |
+| 4 | 20261009-181219 | 8.33 | $0.33 | the trial project opens; pocket surface, labels |
+| 5 | 20261013-160804 | 6.73 | $0.37 | the whole canvas in the screenshot (round 4 rated a larger render) |
+| 6 | 20261013-184940 | 7.40 | $0.41 | 2560 × 1440 window; show only what the user asks |
+| 7 | 20261014-115559 | 9.07 | $0.32 | `pmview_python` returns the view; `pmv.visible`, interactions |
+| 8 | 20261014-150617 | 8.07 (14 cases) | $0.36 | camera by name (azimuth, elevation, roll), Mol* params |
+| 9 | 20261014-192525 | 9.20 | $0.22 | camera kept, focus frames, the whole viewport |
+| 10 | 20261015-113920 | not reviewed | $0.32 | framing of SDF and trajectories; molecule colours from the palette skill |
+
+Round 10 is the last round of this kind. Next: the judge, checked against these reviews, and final runs of the
+first and the current versions (see `docs/implementation-plan.md`).
+
+Notes:
+- vq-covalent-6oim asks for the view, not "a high-quality figure", since round 3; vq-labels-6lu7 became
+  vq-labels-3hs4 in round 4 (OpenAI stopped the old prompt as biological risk).
+- No Harbor reward until the judge: the job files turn the verifier off, and the trial keeps its final view.
